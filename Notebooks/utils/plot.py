@@ -5,7 +5,7 @@ from matplotlib.ticker import FuncFormatter, MultipleLocator
 def set_subplot(ax, x_data, y_data, xlabel, ylabel, title, label='',
                 x_digits=1, y_digits=1, line_color='#120a8f', linewidth=2.,
                 title_pad=20, x_label_pad=8, y_label_pad=8,
-                y_min=None, y_max=None,
+                y_min=None, y_max=None, x_min=None, x_max=None,
                 x_tick_interval=None, y_tick_interval=None):
   """
   Configures a subplot with the specified properties.
@@ -28,6 +28,8 @@ def set_subplot(ax, x_data, y_data, xlabel, ylabel, title, label='',
   - y_label_pad: float, the padding of the y-axis label from the plot (default is 8).
   - y_min: float, the minimum value of the y-axis (default is None).
   - y_max: float, the maximum value of the y-axis (default is None).
+  - x_min: float, the minimum value of the x-axis (default is None).
+  - x_max: float, the maximum value of the x-axis (default is None).
   - x_tick_interval: float, the interval for x-axis ticks (default is None).
   - y_tick_interval: float, the interval for y-axis ticks (default is None).
   """
@@ -40,6 +42,10 @@ def set_subplot(ax, x_data, y_data, xlabel, ylabel, title, label='',
   # Set y-axis limits if specified
   if y_min is not None and y_max is not None:
     ax.set_ylim(y_min, y_max)
+
+  # Set x-axis limits if specified
+  if x_min is not None and x_max is not None:
+    ax.set_xlim(x_min, x_max)
 
   # Set x and y axis tick intervals if specified
   if x_tick_interval is not None:
