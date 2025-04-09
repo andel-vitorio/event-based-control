@@ -6,7 +6,7 @@ def set_subplot(ax, x_data, y_data, xlabel, ylabel, title, label='',
                 x_digits=1, y_digits=1, line_color='#120a8f', linewidth=2.,
                 title_pad=20, x_label_pad=8, y_label_pad=8,
                 y_min=None, y_max=None, x_min=None, x_max=None,
-                x_tick_interval=None, y_tick_interval=None):
+                x_tick_interval=None, y_tick_interval=None, linestyle='-'):
   """
   Configures a subplot with the specified properties.
 
@@ -55,20 +55,20 @@ def set_subplot(ax, x_data, y_data, xlabel, ylabel, title, label='',
     ax.yaxis.set_major_locator(MultipleLocator(y_tick_interval))
 
   # Plot the data
-  line, = ax.plot(x_data, y_data, label=label, linestyle='-',
+  line, = ax.plot(x_data, y_data, label=label, linestyle=linestyle,
                   color=line_color, linewidth=linewidth)
 
   # Set axis labels and title with specified font sizes and padding
-  ax.set_xlabel(xlabel, fontsize=20, labelpad=x_label_pad)
-  ax.set_ylabel(ylabel, fontsize=20, labelpad=y_label_pad)
+  ax.set_xlabel(xlabel, fontsize=16, labelpad=x_label_pad)
+  ax.set_ylabel(ylabel, fontsize=16, labelpad=y_label_pad)
   ax.grid(linestyle='--')
-  ax.set_title(title, fontsize=24, pad=title_pad)
+  ax.set_title(title, fontsize=16, pad=title_pad)
   ax.tick_params(axis='both', direction='in', length=4, width=1,
-                 colors='black', top=True, right=True, labelsize=18)
+                 colors='black', top=True, right=True, labelsize=12)
 
   # Display the legend if a label is provided
   if label:
-    ax.legend(frameon=True, loc='best', framealpha=1, prop={'size': 16})
+    ax.legend(frameon=True, loc='best', framealpha=1, prop={'size': 12})
 
   return line
 
@@ -115,10 +115,10 @@ def set_stem(ax, x_data, y_data, xlabel, ylabel, title,
   plt.setp(markerline, 'markersize', marker_size)
 
   # Set axis labels and title with specified font sizes and padding
-  ax.set_xlabel(xlabel, fontsize=20, labelpad=x_label_pad)
-  ax.set_ylabel(ylabel, fontsize=20, labelpad=y_label_pad)
+  ax.set_xlabel(xlabel, fontsize=12, labelpad=x_label_pad)
+  ax.set_ylabel(ylabel, fontsize=12, labelpad=y_label_pad)
   ax.grid(linestyle='--')
-  ax.set_title(title, fontsize=24, pad=title_pad)
+  ax.set_title(title, fontsize=16, pad=title_pad)
 
   # Set x and y axis limits if specified
   if x_min is not None and x_max is not None:
@@ -128,11 +128,11 @@ def set_stem(ax, x_data, y_data, xlabel, ylabel, title,
     ax.set_ylim(y_min, y_max)
 
   ax.tick_params(axis='both', direction='in', length=4, width=1,
-                 colors='black', top=True, right=True, labelsize=18)
+                 colors='black', top=True, right=True, labelsize=12)
 
   # Display the legend if a label is provided
   if label:
-    ax.legend(frameon=True, loc='best', framealpha=1, prop={'size': 16})
+    ax.legend(frameon=True, loc='best', framealpha=1, prop={'size': 12})
 
   return markerline, stemlines, baseline
 
@@ -147,6 +147,7 @@ def use_latex():
         "text.usetex": True,
         "font.family": "Palatino"
     })
+    plt.rcParams['text.latex.preamble'] = r'\usepackage{mathrsfs}'
     print("LaTeX has been enabled for text rendering.")
   except Exception:
     plt.rcParams.update({
