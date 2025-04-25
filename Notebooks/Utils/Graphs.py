@@ -100,6 +100,9 @@ def plot(ax: Axes,
   y_digits = axis.get('y_digits', 1)
   x_label_pad = axis.get('x_label_pad', 8)
   y_label_pad = axis.get('y_label_pad', 8)
+  x_label_fontsize = axis.get('x_label_fontsize', 16)
+  y_label_fontsize = axis.get('y_label_fontsize', 16)
+  tick_fontsize = axis.get('tick_fontsize', 16)
   title_pad = axis.get('title_pad', 20)
 
   # Tick formatting
@@ -126,11 +129,11 @@ def plot(ax: Axes,
 
   # Optional labels and title
   if xlabel is not None:
-    ax.set_xlabel(xlabel, fontsize=16, labelpad=x_label_pad)
+    ax.set_xlabel(xlabel, fontsize=x_label_fontsize, labelpad=x_label_pad)
   if ylabel is not None:
-    ax.set_ylabel(ylabel, fontsize=16, labelpad=y_label_pad)
+    ax.set_ylabel(ylabel, fontsize=y_label_fontsize, labelpad=y_label_pad)
   if title is not None:
-    ax.set_title(title, fontsize=16, pad=title_pad)
+    ax.set_title(title, fontsize=tick_fontsize, pad=title_pad)
 
   ax.grid(linestyle='--')
   ax.tick_params(axis='both', direction='in', length=4, width=1,
@@ -215,6 +218,9 @@ def stem(ax: Axes,
   x_label_pad = axis.get('x_label_pad', 8)
   y_label_pad = axis.get('y_label_pad', 8)
   title_pad = axis.get('title_pad', 8)
+  x_label_fontsize = axis.get('x_label_fontsize', 16)
+  y_label_fontsize = axis.get('y_label_fontsize', 16)
+  tick_fontsize = axis.get('tick_fontsize', 16)
 
   # Formatter with spacing
   total_width = x_digits + y_digits + 1
@@ -237,11 +243,11 @@ def stem(ax: Axes,
 
   # Optional labels and title
   if xlabel is not None:
-    ax.set_xlabel(xlabel, fontsize=12, labelpad=x_label_pad)
+    ax.set_xlabel(xlabel, fontsize=x_label_fontsize, labelpad=x_label_pad)
   if ylabel is not None:
-    ax.set_ylabel(ylabel, fontsize=12, labelpad=y_label_pad)
+    ax.set_ylabel(ylabel, fontsize=y_label_fontsize, labelpad=y_label_pad)
   if title is not None:
-    ax.set_title(title, fontsize=16, pad=title_pad)
+    ax.set_title(title, fontsize=tick_fontsize, pad=title_pad)
 
   ax.grid(linestyle='--')
 
