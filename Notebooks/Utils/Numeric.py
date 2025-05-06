@@ -1,6 +1,6 @@
 import itertools
 import matplotlib.pyplot as plt
-from typing import List, Tuple, Union
+from typing import List, Sequence, Tuple, Union
 import numpy as np
 from typing import List, Tuple
 from scipy.spatial import ConvexHull
@@ -295,3 +295,27 @@ def ellipsoid_boundary_points(P: np.ndarray, beta: float, num_points: int = 100)
   points = eigvecs @ scaling_matrix @ circle_points * np.sqrt(beta)
 
   return points
+
+
+def diag(values: Sequence[float]) -> np.ndarray:
+  """
+  Creates a diagonal matrix with the given real values on the main diagonal.
+
+  Parameters
+  ----------
+  values : Sequence[float]
+      A sequence (e.g., list, tuple, or NumPy array) of real numbers to be placed on the main diagonal of the matrix.
+
+  Returns
+  -------
+  np.ndarray
+      A square NumPy array with the input values on its main diagonal and zeros elsewhere.
+
+  Examples
+  --------
+  >>> diag([1.0, 2.0, 3.0])
+  array([[1., 0., 0.],
+         [0., 2., 0.],
+         [0., 0., 3.]])
+  """
+  return np.diag(values)
