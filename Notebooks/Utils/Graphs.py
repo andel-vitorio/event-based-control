@@ -91,7 +91,7 @@ def plot(ax: Axes,
   legend_cfg = plot_cfg.get('legend', {})
 
   # Extract style parameters
-  color = style.get('color', '#120a8f')
+  color = style.get('color', 'black')
   linewidth = style.get('linewidth', 2.0)
   linestyle = style.get('linestyle', '-')
 

@@ -30,7 +30,9 @@
     "Rutil",
     "Rytil",
     "Stil",
+    "tcal",
     "Tcal",
+    "toolkits",
     "Vtil",
     "xaxis",
     "XCAL",
@@ -45,5 +47,8 @@
     "Ξtil",
     "Φtil",
     "Ψtil"
+  ],
+  "python.analysis.extraPaths": [
+    "./Notebooks/Utils"
   ]
 }
