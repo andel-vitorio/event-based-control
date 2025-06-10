@@ -1,3 +1,4 @@
+from typing import Callable, Optional, Union, Dict
 import itertools
 import matplotlib.pyplot as plt
 from typing import List, Sequence, Tuple, Union
@@ -319,3 +320,71 @@ def diag(values: Sequence[float]) -> np.ndarray:
          [0., 0., 3.]])
   """
   return np.diag(values)
+
+
+def rk5_step(
+    f: Callable[[float, np.ndarray, np.ndarray, Optional[Dict]], np.ndarray],
+    t: float,
+    x: np.ndarray,
+    u: np.ndarray,
+    T_s: float,
+    params: Optional[Dict] = None
+) -> np.ndarray:
+  """
+  Performs a single fixed-step integration using the Runge-Kutta method of order 5 (RK5).
+
+  This implementation uses a Dormand-Prince-like formulation, without embedded error control,
+  and advances the state `x` over a fixed step `T_s`.
+
+  Parameters
+  ----------
+  f : Callable[[float, np.ndarray, np.ndarray, Optional[dict]], np.ndarray]
+      System dynamics function with signature `f(t, x, u, params)`, where:
+          - t : float
+              Current simulation time.
+          - x : np.ndarray
+              State vector.
+          - u : np.ndarray
+              Control input vector.
+          - params : Optional[dict]
+              Optional dictionary of parameters for the dynamics.
+
+  t : float
+      Current time.
+
+  x : np.ndarray
+      Current state vector.
+
+  u : np.ndarray
+      Input vector at time `t`.
+
+  T_s : float
+      Integration step size (sampling period).
+
+  params : dict, optional
+      Dictionary of additional parameters passed to the function `f`.
+
+  Returns
+  -------
+  np.ndarray
+      Estimated state vector at time `t + T_s`.
+
+  Notes
+  -----
+  This implementation assumes constant input `u` over the integration interval
+  [t, t + T_s], and is intended for use in fixed-step simulation environments.
+
+  References
+  ----------
+  Dormand, J. R., & Prince, P. J. (1980). A family of embedded Runge-Kutta formulae.
+  Journal of Computational and Applied Mathematics, 6(1), 19–26.
+  """
+  k1 = f(t, x, u, params)
+  k2 = f(t, x + T_s * k1 / 4, u, params)
+  k3 = f(t, x + T_s * (3*k1 + 9*k2) / 32, u, params)
+  k4 = f(t, x + T_s * (1932*k1 - 7200*k2 + 7296*k3) / 2197, u, params)
+  k5 = f(t, x + T_s * (439*k1/216 - 8*k2 + 3680*k3/513 - 845*k4/4104), u, params)
+  k6 = f(t, x - T_s * (8*k1/27 - 2*k2 + 3544*k3 /
+         2565 - 1859*k4/4104 + 11*k5/40), u, params)
+
+  return x + T_s * (16*k1/135 + 6656*k3/12825 + 28561*k4/56430 - 9*k5/50 + 2*k6/55)
