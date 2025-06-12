@@ -388,3 +388,57 @@ def rk5_step(
          2565 - 1859*k4/4104 + 11*k5/40), u, params)
 
   return x + T_s * (16*k1/135 + 6656*k3/12825 + 28561*k4/56430 - 9*k5/50 + 2*k6/55)
+
+
+def get_e(lines_number: List[int]) -> Dict[int, np.ndarray]:
+  """
+  Splits an identity matrix into consecutive row blocks according to the provided sizes.
+
+  Args:
+      lines_number (List[int]): A list of integers where each value represents 
+                                the number of rows in the corresponding block.
+
+  Returns:
+      Dict[int, np.ndarray]: A dictionary mapping block indices (starting from 1) 
+                             to their corresponding slices of the identity matrix.
+  """
+  total_columns = sum(lines_number)
+  identity = np.eye(total_columns)
+  slices = {}
+  start = 0
+  for idx, size in enumerate(lines_number, start=1):
+    slices[idx] = identity[start:start + size]
+    start += size
+  return slices
+
+
+def matrix_definiteness(A: np.ndarray, tol: float = 1e-8) -> str:
+  """
+  Determines the definiteness of a symmetric matrix.
+
+  Args:
+      A (np.ndarray): Square symmetric matrix to classify.
+      tol (float): Numerical tolerance for zero comparisons (default 1e-8).
+
+  Returns:
+      str: One of {'pd', 'psd', 'nd', 'nsd', 'und'} representing the definiteness.
+           - 'pd' : Positive definite
+           - 'psd': Positive semidefinite
+           - 'nd' : Negative definite
+           - 'nsd': Negative semidefinite
+           - 'ind': Indefinite
+  """
+  # Ensure the matrix is symmetric to avoid numerical issues
+  A_sym = (A + A.T) / 2
+  eigenvalues = np.linalg.eigvalsh(A_sym)
+
+  if np.all(eigenvalues > tol):
+    return 'pd'
+  elif np.all(eigenvalues >= -tol):
+    return 'psd'
+  elif np.all(eigenvalues < -tol):
+    return 'nd'
+  elif np.all(eigenvalues <= tol):
+    return 'nsd'
+  else:
+    return 'ind'
