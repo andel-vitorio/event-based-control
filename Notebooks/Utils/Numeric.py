@@ -1,5 +1,8 @@
-from typing import Callable, Optional, Union, Dict
+from typing import Iterable, Callable, Optional, Union, Dict
 import itertools
+import math
+import json
+from scipy.interpolate import interp1d
 import matplotlib.pyplot as plt
 from typing import List, Sequence, Tuple, Union
 import numpy as np
@@ -298,30 +301,6 @@ def ellipsoid_boundary_points(P: np.ndarray, beta: float, num_points: int = 100)
   return points
 
 
-def diag(values: Sequence[float]) -> np.ndarray:
-  """
-  Creates a diagonal matrix with the given real values on the main diagonal.
-
-  Parameters
-  ----------
-  values : Sequence[float]
-      A sequence (e.g., list, tuple, or NumPy array) of real numbers to be placed on the main diagonal of the matrix.
-
-  Returns
-  -------
-  np.ndarray
-      A square NumPy array with the input values on its main diagonal and zeros elsewhere.
-
-  Examples
-  --------
-  >>> diag([1.0, 2.0, 3.0])
-  array([[1., 0., 0.],
-         [0., 2., 0.],
-         [0., 0., 3.]])
-  """
-  return np.diag(values)
-
-
 def rk5_step(
     f: Callable[[float, np.ndarray, np.ndarray, Optional[Dict]], np.ndarray],
     t: float,
@@ -442,3 +421,231 @@ def matrix_definiteness(A: np.ndarray, tol: float = 1e-8) -> str:
     return 'nsd'
   else:
     return 'ind'
+
+
+def He(A: np.ndarray) -> np.ndarray:
+  return A + A.T
+
+
+def format_magnitudes(
+    mags: Iterable[float],
+    unit: str = '',
+    use_prefixes: bool = False,
+    n_divs: int = 0
+) -> Tuple[List[float], str, Optional[int]]:
+  """
+  Scales a list of magnitudes for plotting and returns the scaled values,
+  an axis label (LaTeX-formatted), and the number of decimal places
+  required for display based on the resolution defined by `n_divs`.
+
+  Parameters
+  ----------
+  mags : Iterable[float]
+      List or iterable of magnitude values to be scaled.
+  unit : str, optional
+      Unit of measurement to be included in the axis label (default is '').
+  use_prefixes : bool, optional
+      If True, scales magnitudes using SI prefixes (e.g., k, M, μ);
+      otherwise, uses scientific notation (default is False).
+  n_divs : int, optional
+      Number of grid divisions to determine the required decimal precision.
+      If zero or not provided, decimal_places is not computed (default is 0).
+
+  Returns
+  -------
+  scaled_mags : List[float]
+      The input magnitudes scaled by an appropriate factor.
+  label : str
+      A LaTeX-formatted string for axis labeling based on scaling and unit.
+  decimal_places : Optional[int]
+      Number of decimal places needed to distinguish values across `n_divs`.
+      Returns None if `n_divs` is zero.
+  """
+  si_prefixes = {
+      -12: 'p', -9: 'n', -6: 'μ', -3: 'm',
+      0: '', 3: 'k', 6: 'M', 9: 'G', 12: 'T'
+  }
+
+  mags = list(mags)  # ensures multiple passes over input
+  max_mags = max(mags)
+  min_mags = min(mags)
+  order = 0 if max_mags == 0 else math.floor(math.log10(abs(max_mags)))
+
+  if use_prefixes:
+    order3 = int(3 * round(order / 3))
+    prefix = si_prefixes.get(order3, '')
+    multiplier = 10.0 ** (-order3)
+    scaled_mags = [m * multiplier for m in mags]
+    label = rf'$\;$[{prefix}{unit}]' if unit else ''
+  else:
+    multiplier = 10.0 ** (-order)
+    scaled_mags = [m * multiplier for m in mags]
+    if order == 0:
+      label = ''
+    elif order == 1:
+      label = rf'$\;$[$\times 10$ {unit}]' if unit else r'$\;$[$\times 10$]'
+    else:
+      label = rf'$\;$[$\times 10^{{{order}}}$ {unit}]' if unit \
+          else rf'$\;$[$\times 10^{{{order}}}$]'
+
+  decimal_places: Optional[int] = None
+  if n_divs > 0:
+    delta = (max(scaled_mags) - min(scaled_mags)) / n_divs \
+        if max(scaled_mags) != min(scaled_mags) else 0
+    if delta == 0:
+      decimal_places = 0
+    else:
+      decimal_places = max(0, -math.floor(math.log10(delta)))
+
+  return scaled_mags, label, decimal_places
+
+
+class StateSpaceSystem:
+  def __init__(self, json_path: str = None, system_name: str = None, data: dict = None, simulation_time: float = 0.1):
+    if data is not None:
+      systems = data
+    elif json_path:
+      with open(json_path) as f:
+        systems = json.load(f)
+    else:
+      raise ValueError("Deve fornecer 'json_path' ou 'data'.")
+
+    if system_name not in systems:
+      raise ValueError(f"Sistema '{system_name}' não encontrado.")
+
+    self.name = system_name
+    self.system_data = systems[system_name]
+    self.matrices_exprs = self.system_data.get("system_matrices", {})
+
+    labels = self.get_labels()
+    self.nu = len(labels.get("inputs", []))
+    self.nρ = len(labels.get("parameters", []))
+    self.nw = len(labels.get("disturbances", []))
+    self.nx = len(labels.get("states", []))
+
+    self.simulation_time = simulation_time
+    self._init_smooth_interp_noise()
+
+    # Precompila expressões simbólicas
+    self.compiled_matrices = {
+        key: [[compile(expr, '<string>', 'eval')
+               for expr in row] for row in matrix]
+        for key, matrix in self.matrices_exprs.items()
+    }
+   # Compile parameters (value is a string)
+    self.compiled_params = {
+        k: compile(v, "<string>", "eval")
+        for k, v in self.system_data.get("parameters", {}).items()
+        if isinstance(v, str)
+    }
+
+    # Compile disturbances (value is a string)
+    self.compiled_disturbs = {
+        k: compile(v, "<string>", "eval")
+        for k, v in self.system_data.get("disturbances", {}).items()
+        if isinstance(v, str)
+    }
+
+    self.safe_globals = {
+        "__builtins__": None,
+        "math": math,
+        "np": np,
+        "abs": abs,
+        "pow": pow,
+        "noise": {
+            "normal": self.noise_normal,
+            "uniform": self.noise_uniform,
+            "smooth_interp": self.noise_smooth_interp,
+            "harmonic": self.noise_harmonic
+        }
+    }
+
+  def _init_smooth_interp_noise(self, n_points=20, mean=0.0, std=0.2, seed=0):
+    rng = np.random.default_rng(seed)
+    t_ctrl = np.linspace(0, self.simulation_time, n_points)
+    values = rng.normal(mean, std, size=n_points)
+    self._smooth_interp_func = interp1d(
+        t_ctrl, values, kind='cubic', fill_value="extrapolate")
+
+  def noise_normal(self, mu=0.0, sigma=1.0):
+    return np.random.normal(mu, sigma)
+
+  def noise_uniform(self, low=0.0, high=1.0):
+    return np.random.uniform(low, high)
+
+  def noise_smooth_interp(self, t, n_points=20, mean=0.0, std=0.2, seed=0):
+    rng = np.random.default_rng(seed)
+    t_ctrl = np.linspace(0, self.simulation_time, n_points)
+    values = rng.normal(mean, std, size=n_points)
+    interp_func = interp1d(
+        t_ctrl, values, kind='cubic', fill_value="extrapolate")
+    return float(interp_func(t))
+
+  def noise_harmonic(self, t, amplitude=0.5, freq=5.0, mod_amplitude=0.3, mod_freq=1.0):
+    return amplitude * np.sin(2 * np.pi * freq * t + mod_amplitude * np.cos(2 * np.pi * mod_freq * t))
+
+  def evaluate_expr(self, code, context: dict) -> float:
+    return eval(code, self.safe_globals, context)
+
+  def evaluate_matrices(self, state: dict = None, param_vals: dict = None, disturb_vals: dict = None) -> dict:
+    """Avalia as matrizes A, B, E substituindo as variáveis pelas expressões fornecidas."""
+    # Garante que todos os dicionários são válidos
+    env = {}
+    if state:
+      env.update(state)
+    if param_vals:
+      env.update(param_vals)
+    if disturb_vals:
+      env.update(disturb_vals)
+
+    evaluated = {}
+    for key, matrix in self.compiled_matrices.items():
+      evaluated[key] = np.array(
+          [[self.evaluate_expr(expr, env) for expr in row] for row in matrix]
+      )
+    return evaluated
+
+  def evaluate_parameters(self, t: float, state: dict = None) -> list[float]:
+    context = {**(state or {}), "t": t}
+    param_labels = self.get_labels().get("parameters", {})
+    return [self.evaluate_expr(self.compiled_params[k], context) for k in param_labels]
+
+
+  def evaluate_disturbances(self, t: float, state: dict = None) -> list[float]:
+      context = {**(state or {}), "t": t}
+      disturb_labels = self.get_labels().get("disturbances", {})
+      return [self.evaluate_expr(self.compiled_disturbs[k], context) for k in disturb_labels]
+
+  def get_labels(self) -> dict:
+    return self.system_data.get("labels", {})
+
+  def get_rho_bounds(self) -> list[list[float]]:
+    """Retorna os limites dos parâmetros ρ no formato [[ρ1_min, ρ1_max], ..., [ρn_min, ρn_max]]"""
+    labels = self.get_labels().get("parameters", {})
+    param_keys = list(labels.keys())
+
+    bounds_list = []
+
+    # Caso 1: Limites globais em self.system_data["bounds"]["ρ"] (índices como "1", "2", ...)
+    rho_bounds_dict = self.system_data.get("bounds", {}).get("ρ", None)
+    if rho_bounds_dict is not None:
+      for i in range(1, len(param_keys) + 1):
+        bound = rho_bounds_dict.get(str(i), None)
+        if bound is None:
+          raise ValueError(
+              f"Limite do parâmetro ρ com índice '{i}' não encontrado.")
+        bounds_list.append(bound)
+      return bounds_list
+
+  def get_u_bar(self) -> list[float]:
+    """Retorna os limites superiores das entradas (vetor ū = [u1_max, ..., un_max])"""
+    u_bounds = self.system_data.get("bounds", {}).get("u", None)
+    if u_bounds is None:
+      raise ValueError(
+          "Limites superiores das entradas não definidos em 'bounds.u'.")
+
+    if len(u_bounds) != self.nu:
+      raise ValueError(f"Número de limites em 'bounds.u' ({len(u_bounds)}) "
+                       f"não corresponde ao número de entradas ({self.nu}).")
+
+    return u_bounds
