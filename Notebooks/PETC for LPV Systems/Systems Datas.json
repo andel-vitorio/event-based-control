@@ -48,7 +48,181 @@
       "p1": ".5 * math.cos(t)"
     },
     "disturbances": {
-      "w1": "1.4 * math.exp(-.5 * t) * math.sin(.5 * math.pi * t)"
+      "w1": ".5 * math.exp(-.6 * t) * math.sin(.5 * math.pi * t)"
+    },
+    "labels": {
+      "parameters": {
+        "p1": {
+          "name": "Parâmetro $p(t)$",
+          "symbol": "$p$",
+          "unit": ""
+        }
+      },
+      "states": {
+        "x1": {
+          "name": "Estado $x_1(t)$",
+          "symbol": "$x_1$",
+          "unit": ""
+        },
+        "x2": {
+          "name": "Estado $x_2(t)$",
+          "symbol": "$x_2$",
+          "unit": ""
+        }
+      },
+      "inputs": {
+        "u1": {
+          "name": "Entrada $u(t)$",
+          "symbol": "$u$",
+          "unit": ""
+        }
+      },
+      "disturbances": {
+        "w1": {
+          "name": "Distúrbio $w(t)$",
+          "symbol": "$w$",
+          "unit": ""
+        }
+      }
+    }
+  },
+  "Gomes2018": {
+    "system_matrices": {
+      "A": [
+        [
+          "0.0",
+          "1.0"
+        ],
+        [
+          "0.1",
+          "0.4 + 0.6 * p1"
+        ]
+      ],
+      "B": [
+        [
+          "0."
+        ],
+        [
+          "1."
+        ]
+      ],
+      "E": [
+        [
+          "0.1"
+        ],
+        [
+          "0.1"
+        ]
+      ]
+    },
+    "bounds": {
+      "u": [
+        0.5
+      ],
+      "ρ": {
+        "1": [
+          -1.0,
+          1.0
+        ]
+      },
+      "w_l2_norm": {
+        "1": [
+          5.0
+        ]
+      }
+    },
+    "parameters": {
+      "p1": "math.cos(t)"
+    },
+    "disturbances": {
+      "w1": "math.exp(-t) * math.sin(t)"
+    },
+    "labels": {
+      "parameters": {
+        "p1": {
+          "name": "Parâmetro $p(t)$",
+          "symbol": "$p$",
+          "unit": ""
+        }
+      },
+      "states": {
+        "x1": {
+          "name": "Estado $x_1(t)$",
+          "symbol": "$x_1$",
+          "unit": ""
+        },
+        "x2": {
+          "name": "Estado $x_2(t)$",
+          "symbol": "$x_2$",
+          "unit": ""
+        }
+      },
+      "inputs": {
+        "u1": {
+          "name": "Entrada $u(t)$",
+          "symbol": "$u$",
+          "unit": ""
+        }
+      },
+      "disturbances": {
+        "w1": {
+          "name": "Distúrbio $w(t)$",
+          "symbol": "$w$",
+          "unit": ""
+        }
+      }
+    }
+  },
+  "MGDC": {
+    "system_matrices": {
+      "A": [
+        [
+          "0.0",
+          "1.0"
+        ],
+        [
+          "0.1",
+          "0.4 + 0.6 * p1"
+        ]
+      ],
+      "B": [
+        [
+          "0."
+        ],
+        [
+          "1."
+        ]
+      ],
+      "E": [
+        [
+          "0.1"
+        ],
+        [
+          "0.1"
+        ]
+      ]
+    },
+    "bounds": {
+      "u": [
+        0.5
+      ],
+      "ρ": {
+        "1": [
+          -1.0,
+          1.0
+        ]
+      },
+      "w_l2_norm": {
+        "1": [
+          5.0
+        ]
+      }
+    },
+    "parameters": {
+      "p1": "math.cos(t)"
+    },
+    "disturbances": {
+      "w1": "math.exp(-t) * math.sin(t)"
     },
     "labels": {
       "parameters": {
