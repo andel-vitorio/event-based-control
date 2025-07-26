@@ -92,7 +92,7 @@ def plot(ax: Axes,
 
   # Extract style parameters
   color = style.get('color', 'black')
-  linewidth = style.get('linewidth', 2.0)
+  linewidth = style.get('linewidth', 1.67)
   linestyle = style.get('linestyle', '-')
 
   # Extract axis formatting
@@ -209,7 +209,7 @@ def stem(ax: Axes,
 
   # Extract style parameters
   color = style.get('color', '#120a8f')
-  stem_width = style.get('linewidth', 2.0)
+  stem_width = style.get('linewidth', 1.67)
   marker_size = style.get('marker_size', 4)
 
   # Axis formatting
