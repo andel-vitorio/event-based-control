@@ -259,5 +259,264 @@
         }
       }
     }
+  },
+  "Oliveira2025": {
+    "system_matrices": {
+      "A": [
+        [
+          "2. * p1",
+          "1.1 + p1"
+        ],
+        [
+          "-2.2 + p1",
+          "-3.3 + 0.1 * p1"
+        ]
+      ],
+      "B": [
+        [
+          "2. * p1"
+        ],
+        [
+          "0.1 + p1"
+        ]
+      ],
+      "E": [
+        [
+          "-0.03"
+        ],
+        [
+          "-0.47"
+        ]
+      ]
+    },
+    "bounds": {
+      "u": [
+        
+      ],
+      "ρ": {
+        "1": [
+          -1.0,
+          1.0
+        ]
+      },
+      "w_l2_norm": {
+        "1": [
+          5.0
+        ]
+      }
+    },
+    "parameters": {
+      "p1": "math.cos(t)"
+    },
+    "disturbances": {
+      "w1": "13.75 * math.exp(-10 * t) * math.sin(3 * t)"
+    },
+    "labels": {
+      "parameters": {
+        "p1": {
+          "name": "Parâmetro $p(t)$",
+          "symbol": "$p$",
+          "unit": ""
+        }
+      },
+      "states": {
+        "x1": {
+          "name": "Estado $x_1(t)$",
+          "symbol": "$x_1$",
+          "unit": ""
+        },
+        "x2": {
+          "name": "Estado $x_2(t)$",
+          "symbol": "$x_2$",
+          "unit": ""
+        }
+      },
+      "inputs": {
+        "u1": {
+          "name": "Entrada $u(t)$",
+          "symbol": "$u$",
+          "unit": ""
+        }
+      },
+      "disturbances": {
+        "w1": {
+          "name": "Distúrbio $w(t)$",
+          "symbol": "$w$",
+          "unit": ""
+        }
+      }
+    }
+  },
+  "Zanette2021": {
+    "system_matrices": {
+      "A": [
+        [
+          "-4.1 - 3.0 * p1",
+          "-2.0 * p1"
+        ],
+        [
+          "1",
+          "2.0 - 3.2 * p1"
+        ]
+      ],
+      "B": [
+        [
+          "3.0"
+        ],
+        [
+          "2.0"
+        ]
+      ],
+      "E": [
+        [
+          "-0.03"
+        ],
+        [
+          "-0.47"
+        ]
+      ]
+    },
+    "bounds": {
+      "u": [0.5],
+      "ρ": {
+        "1": [
+          -1.0,
+          1.0
+        ]
+      },
+      "w_l2_norm": {
+        "1": [
+          5.0
+        ]
+      }
+    },
+    "parameters": {
+      "p1": "math.sin(t)"
+    },
+    "disturbances": {
+      "w1": "13.75 * math.exp(-10 * t) * math.sin(3 * t)"
+    },
+    "labels": {
+      "parameters": {
+        "p1": {
+          "name": "Parâmetro $p(t)$",
+          "symbol": "$p$",
+          "unit": ""
+        }
+      },
+      "states": {
+        "x1": {
+          "name": "Estado $x_1(t)$",
+          "symbol": "$x_1$",
+          "unit": ""
+        },
+        "x2": {
+          "name": "Estado $x_2(t)$",
+          "symbol": "$x_2$",
+          "unit": ""
+        }
+      },
+      "inputs": {
+        "u1": {
+          "name": "Entrada $u(t)$",
+          "symbol": "$u$",
+          "unit": ""
+        }
+      },
+      "disturbances": {
+        "w1": {
+          "name": "Distúrbio $w(t)$",
+          "symbol": "$w$",
+          "unit": ""
+        }
+      }
+    }
+  },
+  "Hooshmandi2020": {
+    "system_matrices": {
+      "A": [
+        [
+          "0.0",
+          "1.0"
+        ],
+        [
+          "0.1",
+          "0.4  + 0.6 * p1"
+        ]
+      ],
+      "B": [
+        [
+          "0.0"
+        ],
+        [
+          "1.0"
+        ]
+      ],
+      "E": [
+        [
+          "-0.03"
+        ],
+        [
+          "-0.47"
+        ]
+      ]
+    },
+    "bounds": {
+      "u": [
+        0.5
+      ],
+      "ρ": {
+        "1": [
+          -1.0,
+          1.0
+        ]
+      },
+      "w_l2_norm": {
+        "1": [
+          5.0
+        ]
+      }
+    },
+    "parameters": {
+      "p1": "math.sin(.5 * t)"
+    },
+    "disturbances": {
+      "w1": "14.75 * math.exp(-10 * t) * math.sin(3 * t)"
+    },
+    "labels": {
+      "parameters": {
+        "p1": {
+          "name": "Parâmetro $p(t)$",
+          "symbol": "$p$",
+          "unit": ""
+        }
+      },
+      "states": {
+        "x1": {
+          "name": "Estado $x_1(t)$",
+          "symbol": "$x_1$",
+          "unit": ""
+        },
+        "x2": {
+          "name": "Estado $x_2(t)$",
+          "symbol": "$x_2$",
+          "unit": ""
+        }
+      },
+      "inputs": {
+        "u1": {
+          "name": "Entrada $u(t)$",
+          "symbol": "$u$",
+          "unit": ""
+        }
+      },
+      "disturbances": {
+        "w1": {
+          "name": "Distúrbio $w(t)$",
+          "symbol": "$w$",
+          "unit": ""
+        }
+      }
+    }
   }
 }
