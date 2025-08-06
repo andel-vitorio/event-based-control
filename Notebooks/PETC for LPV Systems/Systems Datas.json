@@ -30,7 +30,7 @@
     },
     "bounds": {
       "u": [
-        1.0
+        0.5
       ],
       "ρ": {
         "1": [
@@ -48,7 +48,7 @@
       "p1": ".5 * math.cos(t)"
     },
     "disturbances": {
-      "w1": ".5 * math.exp(-.6 * t) * math.sin(.5 * math.pi * t)"
+      "w1": "1 * math.exp(-2.25 * t) * math.sin(2.0 * math.pi * t)"
     },
     "labels": {
       "parameters": {
@@ -486,6 +486,103 @@
     "labels": {
       "parameters": {
         "p1": {
+          "name": "Parâmetro $p(t)$",
+          "symbol": "$p$",
+          "unit": ""
+        }
+      },
+      "states": {
+        "x1": {
+          "name": "Estado $x_1(t)$",
+          "symbol": "$x_1$",
+          "unit": ""
+        },
+        "x2": {
+          "name": "Estado $x_2(t)$",
+          "symbol": "$x_2$",
+          "unit": ""
+        }
+      },
+      "inputs": {
+        "u1": {
+          "name": "Entrada $u(t)$",
+          "symbol": "$u$",
+          "unit": ""
+        }
+      },
+      "disturbances": {
+        "w1": {
+          "name": "Distúrbio $w(t)$",
+          "symbol": "$w$",
+          "unit": ""
+        }
+      }
+    }
+  },
+  "BuckConverter_Ex1": {
+    "system_matrices": {
+      "A": [
+        [
+          "- 1000.0",
+          "- 1000.0"
+        ],
+        [
+          "450",
+          "18 * p1 - 75"
+        ]
+      ],
+      "B": [
+        [
+          "- 10.0 * p2"
+        ],
+        [
+          "0"
+        ]
+      ],
+      "E": [
+        [
+          "-0"
+        ],
+        [
+          "-0"
+        ]
+      ]
+    },
+    "bounds": {
+      "u": [
+        0.42
+      ],
+      "ρ": {
+        "1": [
+          0,
+          30
+        ],
+        "2": [
+          -5,
+          5
+        ]
+      },
+      "w_l2_norm": {
+        "1": [
+          5.0
+        ]
+      }
+    },
+    "parameters": {
+      "p1": "(30.0 / (1.0 + np.exp(-125 *(t - 0.05)))) - 15",
+      "p2": "5.0 * math.sin(50 * t)"
+    },
+    "disturbances": {
+      "w1": "8e4 * math.exp(-75 * t) * math.sin(5 * t)"
+    },
+    "labels": {
+      "parameters": {
+        "p1": {
+          "name": "Parâmetro $p(t)$",
+          "symbol": "$p$",
+          "unit": ""
+        },
+        "p2": {
           "name": "Parâmetro $p(t)$",
           "symbol": "$p$",
           "unit": ""
