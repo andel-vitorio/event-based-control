@@ -141,10 +141,15 @@ def plot(ax: Axes,
 
   # Optional legend
   if label:
-    legend_size = legend_cfg.get('fontsize', 12)
-    ax.legend(frameon=True, loc='best', framealpha=1,
-              prop={'size': legend_size})
+      legend_size = legend_cfg.get('fontsize', 12)
+      legend_ncol = legend_cfg.get('ncol', 1)        # Novo parâmetro
+      legend_loc = legend_cfg.get('loc', 'best')     # Novo parâmetro
 
+      ax.legend(frameon=True,
+                loc=legend_loc,
+                ncol=legend_ncol,
+                framealpha=1,
+                prop={'size': legend_size})
   return line
 
 
