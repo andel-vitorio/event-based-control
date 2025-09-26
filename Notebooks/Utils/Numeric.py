@@ -505,7 +505,7 @@ class StateSpaceSystem:
     if data is not None:
       systems = data
     elif json_path:
-      with open(json_path) as f:
+      with open(json_path, encoding='utf-8') as f:
         systems = json.load(f)
     else:
       raise ValueError("Deve fornecer 'json_path' ou 'data'.")
@@ -610,11 +610,10 @@ class StateSpaceSystem:
     param_labels = self.get_labels().get("parameters", {})
     return [self.evaluate_expr(self.compiled_params[k], context) for k in param_labels]
 
-
   def evaluate_disturbances(self, t: float, state: dict = None) -> list[float]:
-      context = {**(state or {}), "t": t}
-      disturb_labels = self.get_labels().get("disturbances", {})
-      return [self.evaluate_expr(self.compiled_disturbs[k], context) for k in disturb_labels]
+    context = {**(state or {}), "t": t}
+    disturb_labels = self.get_labels().get("disturbances", {})
+    return [self.evaluate_expr(self.compiled_disturbs[k], context) for k in disturb_labels]
 
   def get_labels(self) -> dict:
     return self.system_data.get("labels", {})
