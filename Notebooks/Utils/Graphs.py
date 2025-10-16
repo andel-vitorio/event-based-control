@@ -137,19 +137,19 @@ def plot(ax: Axes,
 
   ax.grid(linestyle='--')
   ax.tick_params(axis='both', direction='in', length=4, width=1,
-                 colors='black', top=True, right=True, labelsize=12)
+                 colors='black', top=True, right=True, labelsize=tick_fontsize)
 
   # Optional legend
   if label:
-      legend_size = legend_cfg.get('fontsize', 12)
-      legend_ncol = legend_cfg.get('ncol', 1)        # Novo parâmetro
-      legend_loc = legend_cfg.get('loc', 'best')     # Novo parâmetro
+    legend_size = legend_cfg.get('fontsize', 12)
+    legend_ncol = legend_cfg.get('ncol', 1)        # Novo parâmetro
+    legend_loc = legend_cfg.get('loc', 'best')     # Novo parâmetro
 
-      ax.legend(frameon=True,
-                loc=legend_loc,
-                ncol=legend_ncol,
-                framealpha=1,
-                prop={'size': legend_size})
+    ax.legend(frameon=True,
+              loc=legend_loc,
+              ncol=legend_ncol,
+              framealpha=1,
+              prop={'size': legend_size})
   return line
 
 
@@ -263,7 +263,7 @@ def stem(ax: Axes,
     ax.set_ylim(limits['y_min'], limits['y_max'])
 
   ax.tick_params(axis='both', direction='in', length=4, width=1,
-                 colors='black', top=True, right=True, labelsize=12)
+                 colors='black', top=True, right=True, labelsize=tick_fontsize)
 
   # Legend
   if label:
