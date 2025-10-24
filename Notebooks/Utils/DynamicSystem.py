@@ -229,13 +229,15 @@ class NetworkedControlSystem:
         0, duration, self.n_steps, dtype=self.dtype)
 
     for name, sys in self.systems.items():
-      ny = sys.nx  # assume número de saídas igual ao estado
+      ny = getattr(sys, 'ny', getattr(sys, 'nx', 1))
       self.output_history[name] = np.zeros(
           (ny, self.n_steps), dtype=self.dtype)
 
   def advance_clock(self) -> bool:
     if self.current_step < self.n_steps:
       self.t = self.dtype(self.current_step) * self.dt
+      decimals = int(abs(np.floor(np.log10(float(self.dt))))) + 1
+      self.t = np.round(self.t, decimals).astype(self.dtype)
       self.current_step += 1
       return True
     return False
@@ -266,3 +268,27 @@ class NetworkedControlSystem:
     self.current_step = 0
     for sys in self.systems.values():
       sys.reset()
+
+
+class Sampler:
+  """
+  Sampler clock for NCS. Returns True at sampling instants.
+  """
+
+  def __init__(self, Ts: float, dtype=np.float32):
+    self.Ts = dtype(Ts)
+    self.dtype = dtype
+    self.last_sample_time = self.dtype(-Ts)
+
+  def check(self, t: float) -> bool:
+    """
+    Call at each simulation step.
+    Returns True if a new sample occurs at time t.
+    """
+    if t - self.last_sample_time >= self.Ts - np.finfo(self.dtype).eps:
+      self.last_sample_time = t
+      return True
+    return False
+
+  def reset(self):
+    self.last_sample_time = -self.Ts
