@@ -1,62 +1,110 @@
+from IPython.display import display, Math
+import re
 from IPython.display import display, HTML, Math, Latex
 import numpy as np
 import math
 
 
-def display_latex(latex_string: str, inline: bool = True) -> None:
+import re
+import numpy as np
+from typing import Union, List
+from IPython.display import display, Math
+
+
+def dec2tex(value: Union[str, float, int],
+            format_type: str = "scientific",
+            decimals: int = 2) -> str:
   """
-  Displays a LaTeX-formatted expression using IPython's Math display.
+  Converts a numeric or symbolic value into a LaTeX-compatible string.
 
   Parameters
   ----------
-  latex_string : str
-      The LaTeX-formatted expression to display (e.g., '\\beta', '\\frac{1}{2}', '\\sqrt{2}', etc.).
-  inline : bool, optional
-      Whether to display the math inline. Default is True.
+  value : str | float | int
+      Value to be converted. Can contain symbolic terms like 'a1', 'k_2', or numeric values.
+  format_type : str, optional
+      Either "scientific" (default) for scientific notation or "decimal" for fixed-point.
+  decimals : int, optional
+      Number of decimal places to show for numeric values.
+
+  Returns
+  -------
+  str
+      LaTeX-formatted string representing the value.
   """
-  display(Math(latex_string if inline else f'\\[{latex_string}\\]'))
+  if isinstance(value, str):
+    expr = value.replace("*", "\\,")  # spacing for products
+    # Convert variables like a1, k_2, theta3 → a_{1}, k_{2}, theta_{3}
+    expr = re.sub(r"([a-zA-Zα-ωΑ-Ω]+)_?(\d+)", r"\1_{\2}", expr)
+    return expr
 
+  try:
+    num = float(value)
+  except (ValueError, TypeError):
+    return str(value)
 
-def dec2tex(value: float, format_type: str = "scientific", decimals: int = 2) -> str:
-  """
-  Formata um número decimal para o estilo LaTeX.
-
-  Parâmetros:
-  - value (float): O número a ser formatado.
-  - format_type (str): "scientific" para notação científica ou "decimal" para truncado.
-  - decimals (int): Número de casas decimais a serem exibidas.
-
-  Retorna:
-  - str: Representação formatada do número em LaTeX.
-  """
   if format_type == "scientific":
-    if value == 0:
-      return "0"
-    exponent = math.floor(math.log10(abs(value)))
-    mantissa = value / (10 ** exponent)
-    return (f'{mantissa:.{decimals}f} \\times 10^{{{exponent}}}')
-  elif format_type == "decimal":
-    factor = 10 ** decimals
-    truncated_value = math.trunc(value * factor) / factor
-    return Math(rf"{truncated_value:.{decimals}f})")
+    formatted = f"{num:.{decimals}e}"
+    base, exp = formatted.split("e")
+    exp = int(exp)
+    return f"{base}\\times10^{{{exp}}}"
   else:
-    raise ValueError("format_type deve ser 'scientific' ou 'decimal'")
+    return f"{num:.{decimals}f}"
 
 
-def mat2tex(matrix, format_type: str = "scientific", decimals: int = 2) -> str:
+def mat2tex(matrix: Union[List[List[Union[str, float, int]]], np.ndarray],
+            format_type: str = "scientific",
+            decimals: int = 2) -> str:
   """
-  Formata uma matriz para o estilo LaTeX.
+  Converts a numeric or symbolic matrix into a LaTeX-formatted string.
 
-  Parâmetros:
-  - matrix (list ou np.ndarray): A matriz a ser formatada.
-  - format_type (str): "scientific" para notação científica ou "decimal" para truncado.
-  - decimals (int): Número de casas decimais a serem exibidas.
+  Parameters
+  ----------
+  matrix : list[list[str | float | int]] | np.ndarray
+      Matrix to be formatted. Elements may contain symbolic expressions.
+  format_type : str, optional
+      Either "scientific" or "decimal". Default is "scientific".
+  decimals : int, optional
+      Number of decimal places to show for numeric entries.
 
-  Retorna:
-  - str: Representação formatada da matriz em LaTeX.
+  Returns
+  -------
+  str
+      LaTeX string representing the matrix (e.g., '\\begin{bmatrix} ... \\end{bmatrix}').
   """
-  matrix = np.array(matrix)
-  formatted_rows = [" & ".join(dec2tex(
-      num, format_type, decimals) for num in row) for row in matrix]
+  matrix = np.array(matrix, dtype=object)
+  formatted_rows = []
+  for row in matrix:
+    formatted_row = " & ".join(
+        dec2tex(val, format_type, decimals) for val in row)
+    formatted_rows.append(formatted_row)
   formatted_matrix = " \\\\ ".join(formatted_rows)
   return f"\\begin{{bmatrix}} {formatted_matrix} \\end{{bmatrix}}"
+
+
+def display_matrix(matrix: Union[List[List[Union[str, float, int]]], np.ndarray],
+                   name: str = None,
+                   format_type: str = "scientific",
+                   decimals: int = 2) -> None:
+  """
+  Displays a numeric or symbolic matrix as a LaTeX equation inside a Jupyter Notebook.
+
+  Parameters
+  ----------
+  matrix : list[list[str | float | int]] | np.ndarray
+      Matrix to be displayed.
+  name : str, optional
+      Optional label to show before the matrix (e.g., "A =").
+  format_type : str, optional
+      Either "scientific" or "decimal". Default is "scientific".
+  decimals : int, optional
+      Number of decimal places for numeric values.
+
+  Returns
+  -------
+  None
+      The matrix is rendered in LaTeX within the notebook.
+  """
+  latex_matrix = mat2tex(matrix, format_type, decimals)
+  if name:
+    latex_matrix = f"{name} = " + latex_matrix
+  display(Math(latex_matrix))

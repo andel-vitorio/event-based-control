@@ -1,3 +1,4 @@
+from typing import Dict, Any, Union
 from typing import Iterable, Callable, Optional, Union, Dict
 import itertools
 import math
@@ -8,6 +9,8 @@ from typing import List, Sequence, Tuple, Union
 import numpy as np
 from typing import List, Tuple
 from scipy.spatial import ConvexHull
+from IPython.display import display, Math
+from Tex import *
 
 
 def binary_pairs(p: int) -> List[List[Tuple[Tuple[int, ...], Tuple[int, ...]]]]:
@@ -374,11 +377,11 @@ def get_e(lines_number: List[int]) -> Dict[int, np.ndarray]:
   Splits an identity matrix into consecutive row blocks according to the provided sizes.
 
   Args:
-      lines_number (List[int]): A list of integers where each value represents 
+      lines_number (List[int]): A list of integers where each value represents
                                 the number of rows in the corresponding block.
 
   Returns:
-      Dict[int, np.ndarray]: A dictionary mapping block indices (starting from 1) 
+      Dict[int, np.ndarray]: A dictionary mapping block indices (starting from 1)
                              to their corresponding slices of the identity matrix.
   """
   total_columns = sum(lines_number)
@@ -498,6 +501,46 @@ def format_magnitudes(
       decimal_places = max(0, -math.floor(math.log10(delta)))
 
   return scaled_mags, label, decimal_places
+
+
+class TimeVaryingVector:
+  """
+  Represents a time-varying vector with components defined by expressions.
+  Precompiles expressions to numeric functions to avoid eval in loops.
+  """
+
+  def __init__(self, expressions: dict[str, str], eps: float = 1e-6, **kwargs):
+    if not isinstance(expressions, dict):
+      raise TypeError(
+          "expressions must be a dictionary {name: expression_str}")
+
+    self.expressions = expressions
+    self.names = list(expressions.keys())
+    self.dimension = len(expressions)
+    self.eps = eps
+    self.dtype = kwargs.get("dtype", np.float32)
+
+    # Precompile expressions to functions
+    self.compiled_funcs = {}
+    for name, expr in self.expressions.items():
+      # Criar função lambda: f(t, externals) -> float32
+      code = compile(expr, "<string>", "eval")
+      self.compiled_funcs[name] = lambda t, externals, code=code: np.float32(
+          round(eval(code, {"__builtins__": None,
+                "math": math}, {"t": t, **externals}))
+      )
+
+  def value_at(self, t: float, externals: dict[str, Any] = None) -> np.ndarray:
+    externals = externals or {}
+    values = []
+    for name in self.names:
+      func = self.compiled_funcs[name]
+      val = func(t, externals)
+      # Correção numérica
+      if abs(val - round(val)) < self.eps:
+        val = round(val)
+      values.append([val])
+    return np.array(values, dtype=self.dtype)
 
 
 class StateSpaceSystem:

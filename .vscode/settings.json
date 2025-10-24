@@ -5,6 +5,8 @@
     "Bscr",
     "clsim",
     "cmap",
+    "DETM",
+    "DSPETC",
     "Fscr",
     "Gcal",
     "griddata",
@@ -39,6 +41,7 @@
     "XCAL",
     "Xinv",
     "xlim",
+    "xnorm",
     "Xtil",
     "yaxis",
     "ylim",
@@ -51,7 +54,5 @@
     "Φtil",
     "Ψtil"
   ],
-  "python.analysis.extraPaths": [
-    "./Notebooks/Utils"
-  ]
+  "python.analysis.extraPaths": ["./Notebooks/Utils"]
 }
