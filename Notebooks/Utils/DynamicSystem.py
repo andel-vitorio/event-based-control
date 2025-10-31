@@ -15,18 +15,22 @@ class System:
                dynamics: Optional[Callable] = None,
                output_func: Optional[Callable] = None):
     self.name = name
-    self.x = x0.copy() if x0 is not None else None
+    self.states = x0.copy() if x0 is not None else None
     self.dynamics = dynamics
     self.output_func = output_func
     self.outputs: Dict[str, Any] = {}
 
   def update(self, t: float, inputs: Dict[str, Any], dt: float):
-    if self.dynamics is not None and self.x is not None:
-      self.x = rk5_step(self.dynamics, t, self.x, inputs, dt)
+    if self.dynamics is not None:
+      if self.states is None:
+        raise ValueError(
+            f"Invalid state in '{self.name}': 'dynamics' is defined but 'states' is None."
+        )
+      self.states = rk5_step(self.dynamics, t, self.states, inputs, dt)
 
   def output(self, t: float, inputs: Dict[str, Any]) -> Dict[str, Any]:
     if self.output_func is not None:
-      self.outputs = self.output_func(t, self.x, inputs)
+      self.outputs = self.output_func(t, self.states, inputs)
     return self.outputs
 
 
@@ -98,20 +102,21 @@ class StateSpace(System):
     if x0.shape[0] != self.nx or x0.shape[1] != 1:
       raise ValueError(f"x0 deve ter dimensão ({self.nx}, 1)")
     self._x0 = x0.astype(self.dtype)
-    self.x = self._x0.copy()
+    self.states = self._x0.copy()
 
   def reset(self):
     if self._x0 is None:
       raise ValueError(
           "Estado inicial não definido. Use setup_simulation(x0).")
-    self.x = self._x0.copy()
+    self.states = self._x0.copy()
 
   # ===========================================================
   # Avaliação interna
   # ===========================================================
 
   def _dynamics(self, t: float, x: np.ndarray, u_dict: dict, params=None):
-    # Converte inputs para vetor NumPy
+    x = self.states
+
     u_vec = np.hstack(list(u_dict.values())).astype(
         self.dtype) if u_dict else np.zeros((self.nu,), dtype=self.dtype)
 
@@ -201,20 +206,44 @@ class StateSpace(System):
     return {k: np.array(v, dtype=self.dtype) for k, v in matrices.items()}
 
 
+class _SimulationStep:
+  """
+  Classe auxiliar interna (Gerenciador de Contexto) para gerenciar
+  um único passo de simulação.
+  """
+
+  def __init__(self, ncs_instance, default_inputs=None):
+    self.ncs = ncs_instance
+    if default_inputs is None:
+      self.inputs = {}
+    else:
+      self.inputs = default_inputs
+
+  def __enter__(self):
+    return self
+
+  def __exit__(self, exc_type, exc_value, traceback):
+    if exc_type is None:
+      self.ncs.update_systems(self.inputs)
+    return False
+
+
 class NetworkedControlSystem:
   def __init__(self, dtype=np.float32):
     self.systems = {}
-    self.dtype = dtype       # Tipo numérico padrão
+    self.dtype = dtype
     self.t = self.dtype(0.0)
     self.dt = self.dtype(1e-4)
     self.duration = self.dtype(0.0)
     self.n_steps = 0
     self.current_step = 0
-    self.output_history = {}  # histórico de saídas
+    self.output_history = {}
     self.time_history = None
 
-  def add_system(self, system: System, name: str):
-    self.systems[name] = system
+  def add_system(self, system):
+    if not getattr(system, "name", None):
+      raise ValueError("Cannot add a system without a valid name.")
+    self.systems[system.name] = system
 
   def setup_clock(self, duration: float, dt: float = 1e-4):
     self.duration = self.dtype(duration)
@@ -224,14 +253,12 @@ class NetworkedControlSystem:
     self.current_step = 0
 
     # Inicializa histórico de saídas e tempo
-    self.output_history = {}
     self.time_history = np.linspace(
         0, duration, self.n_steps, dtype=self.dtype)
-
-    for name, sys in self.systems.items():
-      ny = getattr(sys, 'ny', getattr(sys, 'nx', 1))
-      self.output_history[name] = np.zeros(
-          (ny, self.n_steps), dtype=self.dtype)
+    self.output_history = {}
+    for name in self.systems:
+      # Lista temporária para armazenar qualquer tipo de saída
+      self.output_history[name] = [None] * self.n_steps
 
   def advance_clock(self) -> bool:
     if self.current_step < self.n_steps:
@@ -242,21 +269,31 @@ class NetworkedControlSystem:
       return True
     return False
 
+  def step(self, default_inputs=None):
+    """Context manager para um passo de simulação."""
+    return _SimulationStep(self, default_inputs)
+
   def update_systems(self, inputs: dict):
     for name, sys in self.systems.items():
       u = inputs.get(name, None)
       sys.update(self.t, u, self.dt)
-      y_vec = sys.output(self.t, u).flatten()  # vetor nx,1
-      self.output_history[name][:,
-                                self.current_step-1] = y_vec.astype(self.dtype)
+      y = sys.output(self.t, u)
 
-    return self.t, self.output_history
+      # Converte qualquer saída para array 2D
+      y_array = np.atleast_1d(y).reshape(-1, 1)
+      self.output_history[name][self.current_step - 1] = y_array
+
+  def finalize_history(self):
+    """Converte listas temporárias em arrays NumPy 2D (ny, n_steps)."""
+    for name, hist in self.output_history.items():
+        # hist é uma lista de arrays (ny,1) ou (1,1)
+      self.output_history[name] = np.concatenate(
+          hist, axis=1)  # concatena colunas
 
   def get_system_output(self, system_name: str) -> np.ndarray:
     sys = self.get_system(system_name)
     y = sys.output(self.t, {})
-    # Se a saída for vetor NumPy, apenas converte dtype
-    return np.array(y, dtype=self.dtype).reshape(-1, 1)
+    return np.atleast_1d(y).reshape(-1, 1).astype(self.dtype)
 
   def get_system(self, system_name: str):
     if system_name not in self.systems:

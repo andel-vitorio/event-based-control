@@ -2,10 +2,11 @@ from typing import Optional, Dict, Any
 import itertools
 import cvxpy as cp
 import numpy as np
-import Numeric as nm  # Deve conter binary_pairs, He, get_e
+import Numeric as nm
+from DynamicSystem import *
 
 
-def DETM(
+def detm_synthesis(
     plant_data: Dict[str, Any],
     design_params: Dict[str, float],
     eps: float = 1e-6,
@@ -287,3 +288,52 @@ def DETM(
         'bounds': [γ.value, β.value]
     }
   return design_results
+
+
+class DETM(System):
+  def __init__(self, Ξ: np.ndarray, Ψ: np.ndarray, λ: float, θ: float, name: str = 'DETM'):
+    super().__init__(name=name, dynamics=None, output_func=None)
+    self.Ξ = Ξ
+    self.Ψ = Ψ
+    self.λ = λ
+    self.θ = θ
+
+    self.η0 = None
+    self.x_hat = None
+    self.xm = None
+
+    self.dynamics = self._dynamics
+    self.output_func = self._output_func
+
+  # --- Property: η é apenas uma interface para states ---
+  @property
+  def η(self):
+    return self.states
+
+  @η.setter
+  def η(self, value):
+    self.states = value
+
+  # ------------------------------------------------------
+
+  def set_η0(self, η0: float):
+    self.η0 = np.array([[η0]])
+    self.η = self.η0.copy()  # seta states também
+
+  def reset(self):
+    self.η = self.η0.copy()  # seta states também
+
+  def triggering_condition(self) -> bool:
+    return self.η[0][0] + self.θ * self._triggering_func() < 0
+
+  def _triggering_func(self) -> float:
+    x = self.xm
+    ε = self.x_hat - x
+    return (x.T @ self.Ψ @ x - ε.T @ self.Ξ @ ε)[0][0]
+
+  def _dynamics(self, t: float, η: np.ndarray, inputs, params=None):
+    dη = - self.λ * η + self._triggering_func()
+    return dη
+
+  def _output_func(self, t: float, η: np.ndarray, inputs: dict):
+    pass
