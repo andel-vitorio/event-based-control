@@ -1,11 +1,73 @@
+import itertools
 from typing import List, Dict, Optional
 from typing import Dict, Any, Callable, Optional
 import numpy as np
 import math
 from scipy.interpolate import interp1d
 from IPython.display import display, Math
-from numba import njit
 from Numeric import *
+
+
+import hashlib
+import json
+import numpy as np
+
+
+class NpEncoder(json.JSONEncoder):
+  """
+  Codificador JSON customizado para lidar com tipos de dados do NumPy
+  que não são serializáveis por padrão.
+  """
+
+  def default(self, obj):
+    if isinstance(obj, np.integer):
+      return int(obj)
+    if isinstance(obj, np.floating):
+      return float(obj)
+    if isinstance(obj, np.ndarray):
+      return obj.tolist()  # Converte arrays para listas
+    return super(NpEncoder, self).default(obj)
+
+
+def create_simulation_id(plant_object, design_params_dict) -> str:
+  """
+  Gera um ID de hash MD5 único baseado nos dados de definição da planta
+  e nos parâmetros de projeto.
+
+  Args:
+      plant_object: A instância da sua classe StateSpace (que contém .system_data).
+      design_params_dict: O dicionário com os parâmetros de projeto (h, υ, etc.).
+
+  Returns:
+      Uma string de hash MD5 (ex: "sim_a1b2c3d4...")
+  """
+
+  # 1. Obter os dados de definição da planta (o dicionário original)
+  try:
+    plant_definition = plant_object.system_data
+  except AttributeError:
+    raise ValueError(
+        "O objeto 'plant' não possui o atributo 'system_data'.")
+
+  # 2. Combinar todos os dados que definem a simulação
+  combined_data = {
+      "plant_definition": plant_definition,
+      "design_parameters": design_params_dict
+  }
+
+  # 3. Serializar os dados para uma string canônica (ordenada)
+  #    Usamos o NpEncoder para segurança, caso haja tipos numpy.
+  data_string = json.dumps(
+      combined_data,
+      sort_keys=True,
+      cls=NpEncoder
+  )
+
+  # 4. Calcular o hash MD5 da string (codificada como bytes)
+  hash_object = hashlib.md5(data_string.encode('utf-8'))
+  hash_id = hash_object.hexdigest()
+
+  return f"sim_{hash_id}"
 
 
 class System:
@@ -53,6 +115,12 @@ class StateSpace(System):
     self.nρ = len(labels.get("parameters", []))
     self.nw = len(labels.get("disturbances", []))
     self.nx = len(labels.get("states", []))
+    self.ny = len(labels.get("outputs", []))
+
+    # <<< MUDANÇA 1: Adicionar o número de saídas de desempenho 'nz' >>>
+    self.nz = len(labels.get("performance_outputs", []))
+
+    self.bounds = self.system_data.get("bounds", {})
 
     # Compila expressões
     self.compiled_matrices = {
@@ -60,6 +128,7 @@ class StateSpace(System):
               for row in matrix]
         for key, matrix in self.matrices_exprs.items()
     }
+    # ... (resto do __init__ permanece igual) ...
 
     self.compiled_params = {
         k: compile(v, "<string>", "eval")
@@ -82,22 +151,38 @@ class StateSpace(System):
     }
 
     self._x0 = None
-
-    # Atribui os métodos internos
     self.dynamics = self._dynamics
     self.output_func = self._output_func
 
   # ===========================================================
   # Labels
   # ===========================================================
-
   def get_labels(self) -> dict:
     return self.system_data.get("labels", {})
 
   # ===========================================================
+  # Bounds
+  # ===========================================================
+  # ... (todos os métodos 'get_bounds' permanecem iguais) ...
+  def get_bounds(self) -> dict:
+    return self.bounds
+
+  def get_input_bounds(self) -> np.ndarray:
+    u_b = self.bounds.get("u", [])
+    return np.array(u_b, dtype=self.dtype).reshape(-1, 1)
+
+  def get_parameter_bounds(self) -> np.ndarray:
+    p_b = self.bounds.get("ρ", [])
+    return np.array(p_b, dtype=self.dtype)
+
+  def get_disturbance_l2_norm_bound(self) -> np.ndarray:
+    w_l2 = self.bounds.get("w_l2_norm", [])
+    return np.array(w_l2, dtype=self.dtype)
+
+  # ===========================================================
   # Simulação
   # ===========================================================
-
+  # ... (métodos 'set_initial_state' e 'reset' permanecem iguais) ...
   def set_initial_state(self, x0: np.ndarray):
     if x0.shape[0] != self.nx or x0.shape[1] != 1:
       raise ValueError(f"x0 deve ter dimensão ({self.nx}, 1)")
@@ -114,9 +199,13 @@ class StateSpace(System):
   # Avaliação interna
   # ===========================================================
 
-  def _dynamics(self, t: float, x: np.ndarray, u_dict: dict, params=None):
-    x = self.states
-
+  # <<< MUDANÇA 2: Novo método auxiliar para evitar repetição de código >>>
+  def _get_simulation_context(self, t: float, x: np.ndarray, u_dict: dict) -> tuple:
+    """
+    Avalia matrizes e vetores necessários para dinâmica e saídas.
+    Retorna (matrices, u_actual, w_actual)
+    """
+    # 1. Obter vetores de entrada, estado e parâmetros
     u_vec = np.hstack(list(u_dict.values())).astype(
         self.dtype) if u_dict else np.zeros((self.nu,), dtype=self.dtype)
 
@@ -126,33 +215,68 @@ class StateSpace(System):
     ρ_vec = self.evaluate_parameters(t, state_dict)
     w_vec = self.evaluate_disturbances(t, state_dict)
 
-    # Cria dicionários apenas para avaliar as matrizes
     param_dict = dict(
         zip(self.get_labels().get("parameters", {}).keys(), ρ_vec))
     disturb_dict = dict(
         zip(self.get_labels().get("disturbances", {}).keys(), w_vec))
 
+    # 2. Avaliar todas as matrizes
     matrices = self.evaluate_matrices(state_dict, param_dict, disturb_dict)
 
-    A = matrices.get("A", np.zeros((self.nx, self.nx), dtype=self.dtype))
-    B = matrices.get("B", np.zeros((self.nx, self.nu), dtype=self.dtype))
-    E = matrices.get("E", np.zeros((self.nx, self.nw), dtype=self.dtype))
-
+    # 3. Formatar vetores de entrada e distúrbio
     u_actual = u_vec.reshape(-1,
                              1) if self.nu > 0 else np.zeros((0, 1), dtype=self.dtype)
     w_actual = w_vec.reshape(-1,
                              1) if self.nw > 0 else np.zeros((0, 1), dtype=self.dtype)
 
-    dx = A @ x + B @ u_actual + E @ w_actual
+    return matrices, u_actual, w_actual
+
+  # <<< MUDANÇA 3: Refatorar _dynamics >>>
+
+  def _dynamics(self, t: float, x: np.ndarray, u_dict: dict, params=None):
+    # Esta função calcula dx = Ax + Bu + Ew
+    # (Usa 'self.states' como a fonte da verdade para 'x')
+
+    matrices, u_actual, w_actual = self._get_simulation_context(
+        t, self.states, u_dict)
+
+    A = matrices.get("A", np.zeros((self.nx, self.nx), dtype=self.dtype))
+    B = matrices.get("B", np.zeros((self.nx, self.nu), dtype=self.dtype))
+    E = matrices.get("E", np.zeros((self.nx, self.nw), dtype=self.dtype))
+
+    dx = A @ self.states + B @ u_actual + E @ w_actual
     return dx
 
+  # <<< MUDANÇA 4: Refatorar _output_func >>>
   def _output_func(self, t: float, x: np.ndarray, u_dict: dict):
-    # Retorna sempre vetor nx x 1
-    return x.copy()
+    # Calcula a saída de medição y = C*x + D*u
+    # (Usa 'x' passado como argumento, que é o estado atual do solver)
+
+    matrices, u_actual, _ = self._get_simulation_context(t, x, u_dict)
+
+    C = matrices.get("C", np.zeros((self.ny, self.nx), dtype=self.dtype))
+    D = matrices.get("D", np.zeros((self.ny, self.nu), dtype=self.dtype))
+
+    y = C @ x + D @ u_actual
+    return y
+
+  # <<< MUDANÇA 5: Novo método para saída de desempenho >>>
+  def get_performance_output(self, t: float, x: np.ndarray, u_dict: dict) -> np.ndarray:
+    """Calcula a saída de desempenho z = Cz*x + Dz*u."""
+
+    matrices, u_actual, _ = self._get_simulation_context(t, x, u_dict)
+
+    Cz = matrices.get("Cz", np.zeros((self.nz, self.nx), dtype=self.dtype))
+    Dz = matrices.get("Dz", np.zeros((self.nz, self.nu), dtype=self.dtype))
+
+    z = Cz @ x + Dz @ u_actual
+    return z
 
   # ===========================================================
   # Avaliação de expressões
   # ===========================================================
+  # ... (métodos 'evaluate_expr', 'evaluate_parameters', 'evaluate_disturbances',
+  #      'evaluate_matrices' e 'matrices_func' permanecem inalterados) ...
 
   def evaluate_expr(self, code, context: dict) -> float:
     return eval(code, self.safe_globals, context)
@@ -191,18 +315,15 @@ class StateSpace(System):
   def matrices_func(self, ρi):
     """
     Recebe ρi: lista de valores dos parâmetros no vértice
-    Retorna dicionário com as matrizes A, B, C, E no dtype da planta
+    Retorna dicionário com todas as matrizes (A, B, C, D, E, Cz, Dz...)
     """
-    # Pega os nomes dos parâmetros
     labels = self.get_labels()
     param_names = labels.get("parameters", [])
     param_dict = dict(zip(param_names, ρi))
 
-    # Avalia as matrizes usando a planta
     matrices = self.evaluate_matrices(
         state_dict=None, param_vals=param_dict, disturb_vals={})
 
-    # Garante o tipo dtype da planta
     return {k: np.array(v, dtype=self.dtype) for k, v in matrices.items()}
 
 
@@ -286,7 +407,7 @@ class NetworkedControlSystem:
   def finalize_history(self):
     """Converte listas temporárias em arrays NumPy 2D (ny, n_steps)."""
     for name, hist in self.output_history.items():
-        # hist é uma lista de arrays (ny,1) ou (1,1)
+      # hist é uma lista de arrays (ny,1) ou (1,1)
       self.output_history[name] = np.concatenate(
           hist, axis=1)  # concatena colunas
 
@@ -329,3 +450,90 @@ class Sampler:
 
   def reset(self):
     self.last_sample_time = -self.Ts
+
+
+# -----------------------------------------------
+# Controllers
+# -----------------------------------------------
+
+
+class GainScheduledController:
+  """
+  Gain-Scheduled Controller for LPV systems.
+
+  Attributes
+  ----------
+  K : dict
+      Dictionary mapping vertex tuples to gain matrices.
+      Example: {(0, 0): K00, (0, 1): K01, (1, 0): K10, (1, 1): K11}
+  rho_bounds : list of tuples
+      Bounds for each scheduling parameter [(ρ_min₁, ρ_max₁), ..., (ρ_minₙ, ρ_maxₙ)].
+  """
+
+  def __init__(self, K, rho_bounds):
+    """
+    Initialize the controller.
+
+    Parameters
+    ----------
+    K : dict
+        Gain matrices for each vertex of the LPV polytope.
+    rho_bounds : list of tuples
+        Lower and upper bounds for each scheduling parameter.
+    """
+    self.K = K
+    self.rho_bounds = rho_bounds
+
+  def compute_alphas(self, rho_hat):
+    """
+    Compute interpolation weights (alphas) for each scheduling parameter.
+
+    Parameters
+    ----------
+    rho_hat : array-like
+        Current estimated scheduling parameters.
+
+    Returns
+    -------
+    alphas : list of float
+        Normalized interpolation coefficients in [0, 1].
+    """
+    alphas = []
+    for i, rho in enumerate(rho_hat):
+      rho_min, rho_max = self.rho_bounds[i]
+      alpha = (rho_max - rho) / (rho_max - rho_min)
+      alpha = np.clip(alpha, 0.0, 1.0)
+      alphas.append(alpha)
+    return alphas
+
+  def compute(self, x_hat, rho_hat):
+    """
+    Compute the control signal using convex combination of vertex gains.
+
+    Parameters
+    ----------
+    x_hat : ndarray
+        Estimated state vector (n_x, 1).
+    rho_hat : array-like
+        Current scheduling parameters.
+
+    Returns
+    -------
+    u_total : ndarray
+        Control signal (n_u, 1).
+    """
+    alphas = self.compute_alphas(rho_hat)
+    vertex_keys = list(self.K.keys())
+    n_u = self.K[vertex_keys[0]].shape[0]
+
+    u_total = np.zeros((n_u, 1))
+
+    # Convex combination over all vertices
+    for vertex in itertools.product([0, 1], repeat=len(alphas)):
+      weight = 1.0
+      for i, v in enumerate(vertex):
+        weight *= alphas[i] if v == 0 else (1.0 - alphas[i])
+
+      u_total += weight * (self.K[vertex] @ x_hat)
+
+    return u_total

@@ -434,45 +434,25 @@ def format_magnitudes(
     mags: Iterable[float],
     unit: str = '',
     use_prefixes: bool = False,
-    n_divs: int = 0
+    # n_divs: int = 0,  <-- REMOVIDO
+    return_order: bool = False
+    # A assinatura de retorno ainda pode incluir Optional[int] para
+    # manter a compatibilidade da tupla, mas ele será sempre None.
 ) -> Tuple[List[float], str, Optional[int]]:
   """
-  Scales a list of magnitudes for plotting and returns the scaled values,
-  an axis label (LaTeX-formatted), and the number of decimal places
-  required for display based on the resolution defined by `n_divs`.
+  Escala magnitudes para plotagem (prefixos SI ou científico) e
+  retorna os valores escalados e o label do eixo.
 
-  Parameters
-  ----------
-  mags : Iterable[float]
-      List or iterable of magnitude values to be scaled.
-  unit : str, optional
-      Unit of measurement to be included in the axis label (default is '').
-  use_prefixes : bool, optional
-      If True, scales magnitudes using SI prefixes (e.g., k, M, μ);
-      otherwise, uses scientific notation (default is False).
-  n_divs : int, optional
-      Number of grid divisions to determine the required decimal precision.
-      If zero or not provided, decimal_places is not computed (default is 0).
-
-  Returns
-  -------
-  scaled_mags : List[float]
-      The input magnitudes scaled by an appropriate factor.
-  label : str
-      A LaTeX-formatted string for axis labeling based on scaling and unit.
-  decimal_places : Optional[int]
-      Number of decimal places needed to distinguish values across `n_divs`.
-      Returns None if `n_divs` is zero.
+  O cálculo de casas decimais foi REMOVIDO.
   """
   si_prefixes = {
       -12: 'p', -9: 'n', -6: 'μ', -3: 'm',
       0: '', 3: 'k', 6: 'M', 9: 'G', 12: 'T'
   }
 
-  mags = list(mags)  # ensures multiple passes over input
-  max_mags = max(mags)
-  min_mags = min(mags)
-  order = 0 if max_mags == 0 else math.floor(math.log10(abs(max_mags)))
+  mags = list(mags)
+  vmax_abs = max(abs(v) for v in mags) if mags else 0
+  order = 0 if vmax_abs == 0 else math.floor(math.log10(vmax_abs))
 
   if use_prefixes:
     order3 = int(3 * round(order / 3))
@@ -480,9 +460,11 @@ def format_magnitudes(
     multiplier = 10.0 ** (-order3)
     scaled_mags = [m * multiplier for m in mags]
     label = rf'$\;$[{prefix}{unit}]' if unit else ''
+    order_final = order3
   else:
     multiplier = 10.0 ** (-order)
     scaled_mags = [m * multiplier for m in mags]
+    order_final = order
     if order == 0:
       label = ''
     elif order == 1:
@@ -491,16 +473,10 @@ def format_magnitudes(
       label = rf'$\;$[$\times 10^{{{order}}}$ {unit}]' if unit \
           else rf'$\;$[$\times 10^{{{order}}}$]'
 
-  decimal_places: Optional[int] = None
-  if n_divs > 0:
-    delta = (max(scaled_mags) - min(scaled_mags)) / n_divs \
-        if max(scaled_mags) != min(scaled_mags) else 0
-    if delta == 0:
-      decimal_places = 0
-    else:
-      decimal_places = max(0, -math.floor(math.log10(delta)))
-
-  return scaled_mags, label, decimal_places
+  if return_order:
+    return scaled_mags, label, order_final
+  else:
+    return scaled_mags, label
 
 
 class TimeVaryingVector:

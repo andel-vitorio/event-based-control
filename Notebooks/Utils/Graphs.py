@@ -1,9 +1,15 @@
+from matplotlib.ticker import FuncFormatter
+from typing import Any, Dict, Optional, Tuple
+import math
+from typing import Any, Dict, Optional
 import matplotlib.tri as tri
 import numpy as np
 from typing import Any, Dict, List, Optional, Tuple
 from matplotlib.axes import Axes
 from matplotlib.ticker import FuncFormatter, MultipleLocator
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
+from Numeric import format_magnitudes
 
 
 def use_latex():
@@ -26,112 +32,152 @@ def use_latex():
     print("LaTeX is not available. Using default fonts.")
 
 
-def plot(ax: Axes,
-         x_data,
-         y_data,
-         xlabel: Optional[str] = None,
-         ylabel: Optional[str] = None,
-         title: Optional[str] = None,
-         label: str = '',
-         plot_cfg: Dict[str, Any] = {}) -> Any:
-  """
-  Plots a 2D line on the given Axes object using an external structured configuration dictionary.
+def plot(
+    ax: Axes,
+    x_data,
+    y_data,
+    xlabel: Optional[str] = None,
+    ylabel: Optional[str] = None,
+    title: Optional[str] = None,
+    label: str = '',
+    cfg: Dict[str, Any] = {},
+    *,
+    x_unit: str = '',
+    y_unit: str = '',
+    x_use_prefixes: bool = False,
+    y_use_prefixes: bool = False,
+    x_pad: Tuple[float, float] = (0.0, 0.0),
+    y_pad: Tuple[float, float] = (0.0, 0.0),
+    # --- MUDANÇA NA ASSINATURA ---
+    # Agora a tupla externa sempre existe, mas os
+    # elementos *dentro* dela podem ser None.
+    prev_format: Tuple[
+        Optional[Tuple[np.ndarray, str, Optional[int], int]],
+        Optional[Tuple[np.ndarray, str, Optional[int], int]]
+    ] = (None, None)  # O padrão é (auto, auto)
+):
+  style = cfg.get('style', {})
+  axis = cfg.get('axis', {})
+  legend_cfg = cfg.get('legend', {})
 
-  Parameters
-  ----------
-  ax : matplotlib.axes.Axes
-      The Matplotlib Axes object to draw the plot on.
-  x_data : array_like
-      X-axis data.
-  y_data : array_like
-      Y-axis data.
-  xlabel : str, optional
-      Label for the x-axis.
-  ylabel : str, optional
-      Label for the y-axis.
-  title : str, optional
-      Title of the plot.
-  label : str, optional
-      Legend label for the plotted line.
-  plot_cfg : dict, optional
-      Dictionary with structured configuration options. Expected keys:
-
-      - 'style':
-          - 'color' (str)
-          - 'linewidth' (float)
-          - 'linestyle' (str)
-
-      - 'axis':
-          - 'x_digits' (int)
-          - 'y_digits' (int)
-          - 'x_label_pad' (int)
-          - 'y_label_pad' (int)
-          - 'title_pad' (int)
-
-      - 'limits':
-          - 'x_min', 'x_max' (float)
-          - 'y_min', 'y_max' (float)
-
-      - 'ticks':
-          - 'x_tick_interval' (float)
-          - 'y_tick_interval' (float)
-
-      - 'legend':
-          - 'fontsize' (int)
-
-  Returns
-  -------
-  line : Line2D
-      The line object created by the plot.
-  """
-  style = plot_cfg.get('style', {})
-  axis = plot_cfg.get('axis', {})
-  limits = plot_cfg.get('limits', {})
-  ticks = plot_cfg.get('ticks', {})
-  legend_cfg = plot_cfg.get('legend', {})
-
-  # Extract style parameters
+  # ... (configurações de estilo, labels, etc. permanecem iguais) ...
   color = style.get('color', 'black')
   linewidth = style.get('linewidth', 1.67)
   linestyle = style.get('linestyle', '-')
-
-  # Extract axis formatting
-  x_digits = axis.get('x_digits', 1)
-  y_digits = axis.get('y_digits', 1)
-  x_label_pad = axis.get('x_label_pad', 8)
-  y_label_pad = axis.get('y_label_pad', 8)
   x_label_fontsize = axis.get('x_label_fontsize', 16)
   y_label_fontsize = axis.get('y_label_fontsize', 16)
   tick_fontsize = axis.get('tick_fontsize', 16)
+  x_label_pad = axis.get('x_label_pad', 8)
+  y_label_pad = axis.get('y_label_pad', 8)
   title_pad = axis.get('title_pad', 20)
 
-  # Tick formatting
-  ax.xaxis.set_major_formatter(
-      FuncFormatter(lambda v, _: f'{v:.{x_digits}f}'))
-  ax.yaxis.set_major_formatter(
-      FuncFormatter(lambda v, _: f'{v:.{y_digits}f}'))
+  def apply_padding(values, pad):
+    vmin, vmax = np.min(values), np.max(values)
+    if vmin == vmax:
+      vrange = max(abs(vmin) * 0.01, 1e-12)
+      return vmin - vrange, vmax + vrange
+    vrange = vmax - vmin
+    return vmin - pad[0]*vrange, vmax + pad[1]*vrange
 
-  # Axis limits
-  if 'x_min' in limits and 'x_max' in limits:
-    ax.set_xlim(limits['x_min'], limits['x_max'])
-  if 'y_min' in limits and 'y_max' in limits:
-    ax.set_ylim(limits['y_min'], limits['y_max'])
+  x_arr = np.asarray(x_data, dtype=float)
+  y_arr = np.asarray(y_data, dtype=float)
 
-  # Tick intervals
-  if 'x_tick_interval' in ticks:
-    ax.xaxis.set_major_locator(MultipleLocator(ticks['x_tick_interval']))
-  if 'y_tick_interval' in ticks:
-    ax.yaxis.set_major_locator(MultipleLocator(ticks['y_tick_interval']))
+  # --- LÓGICA DE ESCALA (REFEITA) ---
 
-  # Plot data
-  line, = ax.plot(x_data, y_data, label=label,
-                  color=color, linewidth=linewidth, linestyle=linestyle)
+  # 1. Sempre calculamos o formato "novo" (baseado nos dados atuais)
+  fx_new = format_magnitudes(
+      x_arr, x_unit, x_use_prefixes, return_order=True)
+  scaled_x_new, x_label_new, x_order_new = fx_new
 
-  # Optional labels and title
+  fy_new = format_magnitudes(
+      y_arr, y_unit, y_use_prefixes, return_order=True)
+  scaled_y_new, y_label_new, y_order_new = fy_new
+
+  # 2. Desempacotamos o formato anterior
+  prev_x_fmt, prev_y_fmt = prev_format
+
+  # 3. Processamos o Eixo X
+  if prev_x_fmt is None:
+    # X é automático: o formato final é o formato novo
+    x_label = x_label_new
+    x_order_final = x_order_new
+    # Os "dados anteriores" para limites são nulos
+    prev_x_data_for_limits = np.array([])
+  else:
+    # X está travado: o formato final é o formato anterior
+    (prev_scaled_x_data, x_label, x_order_final) = prev_x_fmt
+    # Os "dados anteriores" para limites são os dados do formato
+    prev_x_data_for_limits = prev_scaled_x_data
+
+  # 4. Processamos o Eixo Y
+  if prev_y_fmt is None:
+    # Y é automático: o formato final é o formato novo
+    y_label = y_label_new
+    y_order_final = y_order_new
+    prev_y_data_for_limits = np.array([])
+  else:
+    # Y está travado: o formato final é o formato anterior
+    (prev_scaled_y_data, y_label, y_order_final) = prev_y_fmt
+    prev_y_data_for_limits = prev_scaled_y_data
+
+  # 5. Aplicamos a escala final aos dados novos
+  # (Tratamento especial para dados planos)
+  if np.allclose(np.ptp(x_arr), 0):
+    scaled_x_new = x_arr
+    x_order_new = 0  # Força o expoente a 0
+  if np.allclose(np.ptp(y_arr), 0):
+    scaled_y_new = y_arr
+    y_order_new = 0  # Força o expoente a 0
+
+  # `scaled_x/y` são os dados atuais, escalados para o formato final
+  scaled_x = np.asarray(scaled_x_new) * 10**(x_order_new - x_order_final)
+  scaled_y = np.asarray(scaled_y_new) * 10**(y_order_new - y_order_final)
+
+  # (Evita falha no plot/limite se os dados escalados forem planos)
+  if np.ptp(scaled_x) == 0:
+    scaled_x = scaled_x + 1e-12 * 10**x_order_final
+  if np.ptp(scaled_y) == 0:
+    scaled_y = scaled_y + 1e-12 * 10**y_order_final
+
+  # --- FIM DA LÓGICA DE ESCALA ---
+
+  # (Bloco do FuncFormatter foi removido em etapas anteriores)
+
+  line, = ax.plot(scaled_x, scaled_y, label=label, color=color,
+                  linewidth=linewidth, linestyle=linestyle)
+
+  # --- LÓGICA DE LIMITES (REFEITA) ---
+
+  # 6. Concatenamos os dados anteriores (já escalados) com os novos (agora escalados)
+  all_scaled_x_data = np.concatenate([prev_x_data_for_limits, scaled_x])
+  all_scaled_y_data = np.concatenate([prev_y_data_for_limits, scaled_y])
+
+  # 7. Aplicamos os limites baseados em TODOS os dados
+  x_min = float(np.min(all_scaled_x_data))
+  x_max = float(np.max(all_scaled_x_data))
+  y_min = float(np.min(all_scaled_y_data))
+  y_max = float(np.max(all_scaled_y_data))
+
+  ax.margins(0)
+  ax.set_xlim(apply_padding((x_min, x_max), x_pad))
+  ax.set_ylim(apply_padding((y_min, y_max), y_pad))
+
+  # --- FIM DA LÓGICA DE LIMITES ---
+
+  # --- (Localizador de Ticks) ---
+  # (Como na versão anterior, deixamos o Matplotlib escolher)
+  ax.xaxis.set_major_locator(
+      MaxNLocator(nbins='auto', prune=None))
+  ax.yaxis.set_major_locator(
+      MaxNLocator(nbins='auto', prune=None))
+
+  # ... (labels, grid, legend, etc. permanecem iguais) ...
   if xlabel is not None:
-    ax.set_xlabel(xlabel, fontsize=x_label_fontsize, labelpad=x_label_pad)
+    ax.set_xlabel(xlabel + x_label, fontsize=x_label_fontsize,
+                  labelpad=x_label_pad)
   if ylabel is not None:
-    ax.set_ylabel(ylabel, fontsize=y_label_fontsize, labelpad=y_label_pad)
+    ax.set_ylabel(ylabel + y_label, fontsize=y_label_fontsize,
+                  labelpad=y_label_pad)
   if title is not None:
     ax.set_title(title, fontsize=tick_fontsize, pad=title_pad)
 
@@ -139,18 +185,23 @@ def plot(ax: Axes,
   ax.tick_params(axis='both', direction='in', length=4, width=1,
                  colors='black', top=True, right=True, labelsize=tick_fontsize)
 
-  # Optional legend
   if label:
     legend_size = legend_cfg.get('fontsize', 12)
-    legend_ncol = legend_cfg.get('ncol', 1)        # Novo parâmetro
-    legend_loc = legend_cfg.get('loc', 'best')     # Novo parâmetro
+    legend_ncol = legend_cfg.get('ncol', 1)
+    legend_loc = legend_cfg.get('loc', 'best')
+    ax.legend(frameon=True, loc=legend_loc, ncol=legend_ncol,
+              framealpha=1, prop={'size': legend_size})
 
-    ax.legend(frameon=True,
-              loc=legend_loc,
-              ncol=legend_ncol,
-              framealpha=1,
-              prop={'size': legend_size})
-  return line
+  # 8. Preparamos o formato de RETORNO
+  # O formato de retorno deve conter TODOS os dados (anteriores + atuais)
+  # na escala final, para ser usado na *próxima* chamada.
+  fmt_x_out = (all_scaled_x_data, x_label, x_order_final)
+  fmt_y_out = (all_scaled_y_data, y_label, y_order_final)
+
+  # Retornamos o formato completo para ambos os eixos
+  fmt = (fmt_x_out, fmt_y_out)
+
+  return line, fmt
 
 
 def stem(ax: Axes,
@@ -160,112 +211,132 @@ def stem(ax: Axes,
          ylabel: Optional[str] = None,
          title: Optional[str] = None,
          label: str = '',
-         stem_cfg: Dict[str, Any] = {}) -> Tuple[Any, Any, Any]:
+         cfg: Dict[str, Any] = {},
+         *,
+         x_unit: str = '',
+         y_unit: str = '',
+         x_use_prefixes: bool = False,
+         y_use_prefixes: bool = False,
+         x_pad: Tuple[float, float] = (0.0, 0.0),
+         y_pad: Tuple[float, float] = (0.0, 0.0),
+         x_range: Optional[Tuple[float, float]] = None,
+         reuse_previous: bool = True) -> Tuple[Any, Any, Any]:
   """
-  Plots a stem graph on the given Axes object using an external structured configuration dictionary.
+  Plots a stem graph with automatic scaling, formatting, and optional fixed x-range.
 
   Parameters
   ----------
-  ax : matplotlib.axes.Axes
-      The Matplotlib Axes object to draw the plot on.
-  x_data : array_like
-      X-axis data.
-  y_data : array_like
-      Y-axis data.
-  xlabel : str, optional
-      Label for the x-axis.
-  ylabel : str, optional
-      Label for the y-axis.
-  title : str, optional
-      Title of the plot.
-  label : str, optional
-      Legend label for the stem plot.
-  stem_cfg : dict, optional
-      Dictionary with structured configuration options. Expected keys:
-
-      - 'style':
-          - 'color' (str)
-          - 'linewidth' (float)
-          - 'marker_size' (float)
-
-      - 'axis':
-          - 'x_digits' (int)
-          - 'y_digits' (int)
-          - 'x_label_pad' (int)
-          - 'y_label_pad' (int)
-          - 'title_pad' (int)
-
-      - 'limits':
-          - 'x_min', 'x_max' (float)
-          - 'y_min', 'y_max' (float)
-
-      - 'legend':
-          - 'fontsize' (int)
-
-  Returns
-  -------
-  markerline, stemlines, baseline : tuple
-      Elements of the stem plot returned by `ax.stem`.
+  x_range : tuple(float, float), optional
+      If provided, defines the fixed (x_min, x_max) range for analysis
+      instead of using min(x_data) and max(x_data).
+  reuse_previous : bool, optional
+      If True, reuses previous axis configuration when adding new data.
   """
-  style = stem_cfg.get('style', {})
-  axis = stem_cfg.get('axis', {})
-  limits = stem_cfg.get('limits', {})
-  legend_cfg = stem_cfg.get('legend', {})
 
-  # Extract style parameters
-  color = style.get('color', '#120a8f')
+  style = cfg.get('style', {})
+  axis = cfg.get('axis', {})
+  legend_cfg = cfg.get('legend', {})
+
+  color = style.get('color', 'black')
   stem_width = style.get('linewidth', 1.67)
   marker_size = style.get('marker_size', 4)
 
-  # Axis formatting
-  x_digits = axis.get('x_digits', 3)
-  y_digits = axis.get('y_digits', 2)
-  x_label_pad = axis.get('x_label_pad', 8)
-  y_label_pad = axis.get('y_label_pad', 8)
-  title_pad = axis.get('title_pad', 8)
   x_label_fontsize = axis.get('x_label_fontsize', 16)
   y_label_fontsize = axis.get('y_label_fontsize', 16)
   tick_fontsize = axis.get('tick_fontsize', 16)
+  x_label_pad = axis.get('x_label_pad', 8)
+  y_label_pad = axis.get('y_label_pad', 8)
+  title_pad = axis.get('title_pad', 8)
 
-  # Formatter with spacing
-  total_width = x_digits + y_digits + 1
-  ax.xaxis.set_major_formatter(FuncFormatter(
-      lambda v, _: f'{v:.{x_digits}f}'.rjust(total_width)))
-  ax.yaxis.set_major_formatter(FuncFormatter(
-      lambda v, _: f'{v:.{y_digits}f}'.rjust(total_width)))
+  # --- Handle axis reuse ----------------------------------------------------
+  prev_xlim = ax.get_xlim()
+  prev_ylim = ax.get_ylim()
+  prev_xlabel = ax.get_xlabel()
+  prev_ylabel = ax.get_ylabel()
+  prev_title = ax.get_title()
 
-  # Create stem plot
+  if reuse_previous and hasattr(ax, "_scale_info"):
+    scale_info = ax._scale_info
+    x_multiplier = scale_info["x_multiplier"]
+    y_multiplier = scale_info["y_multiplier"]
+    x_label = scale_info["x_label"]
+    y_label = scale_info["y_label"]
+    x_exp = scale_info["x_exp"]
+    y_exp = scale_info["y_exp"]
+
+    scaled_x = [v * x_multiplier for v in x_data]
+    scaled_y = [v * y_multiplier for v in y_data]
+  else:
+    n_divs = max(5, len(np.unique(x_data)) - 1)
+    scaled_x, x_label, _ = format_magnitudes(
+        x_data, x_unit, x_use_prefixes, n_divs)
+    scaled_y, y_label, _ = format_magnitudes(
+        y_data, y_unit, y_use_prefixes, n_divs)
+
+    def get_exp(multiplier: float) -> int:
+      return int(round(math.log10(1 / multiplier))) if multiplier != 0 else 0
+
+    x_multiplier = (10 ** (-get_exp(max(abs(max(x_data)), 1e-12))))
+    y_multiplier = (10 ** (-get_exp(max(abs(max(y_data)), 1e-12))))
+    x_exp = get_exp(1 / x_multiplier)
+    y_exp = get_exp(1 / y_multiplier)
+
+    ax._scale_info = {
+        "x_multiplier": x_multiplier,
+        "y_multiplier": y_multiplier,
+        "x_label": x_label,
+        "y_label": y_label,
+        "x_exp": x_exp,
+        "y_exp": y_exp
+    }
+
+  # --- Create stem plot -----------------------------------------------------
   markerline, stemlines, baseline = ax.stem(
-      x_data, y_data,
-      linefmt=color,
-      markerfmt='o',
-      basefmt=' ',
-      bottom=0,
-      label=label
+      scaled_x, scaled_y, linefmt=color, markerfmt='o',
+      basefmt=' ', bottom=0, label=label
   )
   plt.setp(stemlines, 'linewidth', stem_width)
   plt.setp(markerline, 'markersize', marker_size)
 
-  # Optional labels and title
+  # --- Compute automatic or fixed paddings ---------------------------------
+  def apply_padding(values, pad, fixed_range=None):
+    if fixed_range is not None:
+      vmin, vmax = fixed_range
+    else:
+      vmin, vmax = np.min(values), np.max(values)
+    if vmin == vmax:
+      return vmin - 1, vmax + 1
+    range_ = vmax - vmin
+    return vmin - pad[0] * range_, vmax + pad[1] * range_
+
+  if not reuse_previous:
+    xlim = apply_padding(scaled_x, x_pad, x_range)
+    ylim = apply_padding(scaled_y, y_pad)
+    ax.set_xlim(xlim)
+    ax.set_ylim(ylim)
+
+  # --- Labels and formatting ------------------------------------------------
   if xlabel is not None:
-    ax.set_xlabel(xlabel, fontsize=x_label_fontsize, labelpad=x_label_pad)
+    ax.set_xlabel(xlabel + x_label, fontsize=x_label_fontsize,
+                  labelpad=x_label_pad)
+  elif not reuse_previous:
+    ax.set_xlabel(prev_xlabel)
+
   if ylabel is not None:
-    ax.set_ylabel(ylabel, fontsize=y_label_fontsize, labelpad=y_label_pad)
+    ax.set_ylabel(ylabel + y_label, fontsize=y_label_fontsize,
+                  labelpad=y_label_pad)
+  elif not reuse_previous:
+    ax.set_ylabel(prev_ylabel)
+
   if title is not None:
     ax.set_title(title, fontsize=tick_fontsize, pad=title_pad)
+  elif not reuse_previous:
+    ax.set_title(prev_title)
 
   ax.grid(linestyle='--')
-
-  # Axis limits
-  if 'x_min' in limits and 'x_max' in limits:
-    ax.set_xlim(limits['x_min'], limits['x_max'])
-  if 'y_min' in limits and 'y_max' in limits:
-    ax.set_ylim(limits['y_min'], limits['y_max'])
-
   ax.tick_params(axis='both', direction='in', length=4, width=1,
                  colors='black', top=True, right=True, labelsize=tick_fontsize)
 
-  # Legend
   if label:
     legend_size = legend_cfg.get('fontsize', 12)
     ax.legend(frameon=True, loc='best', framealpha=1,

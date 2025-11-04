@@ -42,8 +42,7 @@ def detm_synthesis(
   ρ_bounds = plant_data['ρ_bounds']
   u_bar = np.array(plant_data['u_bar'], dtype=dtype)
   matrices_func = plant_data['matrices_func']
-  get_C = plant_data['get_C']
-  nz = 1
+  nz = plant_data['nz']
 
   h = design_params['h']
   υ = design_params['υ']
@@ -63,7 +62,7 @@ def detm_synthesis(
     mats = matrices_func(ρi)
     A[i] = cp.Parameter((nx, nx), value=mats['A'].astype(dtype))
     B[i] = cp.Parameter((nx, nu), value=mats['B'].astype(dtype))
-    C[i] = cp.Parameter((nz, nx), value=get_C(ρi).astype(dtype))
+    C[i] = cp.Parameter((nz, nx), value=mats['Cz'].astype(dtype))
     E[i] = cp.Parameter((nx, nw), value=mats['E'].astype(dtype))
 
   # e vectors

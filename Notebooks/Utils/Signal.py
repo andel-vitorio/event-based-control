@@ -45,21 +45,52 @@ def step_signal(timepts: NDArray[np.float64],
   return signal
 
 
-def sat(u: float, u_bar: float) -> float:
+def sat(u, u_bar):
   """
-  Applies saturation to a value u, limiting its absolute value to u_bar.
+  Applies saturation to a control signal, supporting scalar, vector, or time-varying signals.
 
   Parameters
   ----------
-  u : float
-      The value to be saturated.
-  u_bar : float
-      The saturation threshold, limiting the absolute value of u.
+  u : float or ndarray
+      Control signal to be saturated. Can be:
+      - float: single control value (nu = 1)
+      - ndarray of shape (nu, 1): control vector
+      - ndarray of shape (nu, timepts): time-varying control signal
+  u_bar : float or list or ndarray
+      Saturation limits. Can be:
+      - float: single limit applied to all elements
+      - list or ndarray of shape (nu,): per-element limits
 
   Returns
   -------
-  float
-      The saturated value, which is the sign of u multiplied by the minimum
-      of u_bar and the absolute value of u.
+  ndarray or float
+      Saturated control signal with the same shape as input `u`.
   """
-  return np.sign(u) * min(u_bar, abs(u))
+  u = np.asarray(u, dtype=float)
+
+  # --- Case 1: scalar input ---
+  if np.isscalar(u) or u.ndim == 0:
+    return np.sign(u) * min(abs(u), u_bar)
+
+  # --- Case 2: vector input (nu, 1) ---
+  elif u.ndim == 2 and u.shape[1] == 1:
+    u_bar = np.asarray(u_bar, dtype=float).flatten()
+    if u_bar.size == 1:
+      u_bar = np.full(u.shape[0], u_bar.item())
+
+    u_sat = np.sign(u) * np.minimum(np.abs(u.flatten()), u_bar)
+    return u_sat.reshape(u.shape)
+
+  # --- Case 3: time-varying signal (nu, timepts) ---
+  elif u.ndim == 2:
+    u_bar = np.asarray(u_bar, dtype=float).flatten()
+    if u_bar.size == 1:
+      u_bar = np.full(u.shape[0], u_bar.item())
+
+    # Broadcasting to apply per-channel saturation across time
+    u_sat = np.sign(u) * np.minimum(np.abs(u), u_bar[:, np.newaxis])
+    return u_sat
+
+  else:
+    raise ValueError(
+        "Unsupported input shape for 'u'. Expected scalar, (nu, 1), or (nu, timepts).")
