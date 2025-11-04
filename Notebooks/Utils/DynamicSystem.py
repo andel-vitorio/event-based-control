@@ -6,6 +6,7 @@ import math
 from scipy.interpolate import interp1d
 from IPython.display import display, Math
 from Numeric import *
+import re
 
 
 import hashlib
@@ -116,8 +117,6 @@ class StateSpace(System):
     self.nw = len(labels.get("disturbances", []))
     self.nx = len(labels.get("states", []))
     self.ny = len(labels.get("outputs", []))
-
-    # <<< MUDANÇA 1: Adicionar o número de saídas de desempenho 'nz' >>>
     self.nz = len(labels.get("performance_outputs", []))
 
     self.bounds = self.system_data.get("bounds", {})
@@ -128,7 +127,6 @@ class StateSpace(System):
               for row in matrix]
         for key, matrix in self.matrices_exprs.items()
     }
-    # ... (resto do __init__ permanece igual) ...
 
     self.compiled_params = {
         k: compile(v, "<string>", "eval")
@@ -163,7 +161,6 @@ class StateSpace(System):
   # ===========================================================
   # Bounds
   # ===========================================================
-  # ... (todos os métodos 'get_bounds' permanecem iguais) ...
   def get_bounds(self) -> dict:
     return self.bounds
 
@@ -182,7 +179,6 @@ class StateSpace(System):
   # ===========================================================
   # Simulação
   # ===========================================================
-  # ... (métodos 'set_initial_state' e 'reset' permanecem iguais) ...
   def set_initial_state(self, x0: np.ndarray):
     if x0.shape[0] != self.nx or x0.shape[1] != 1:
       raise ValueError(f"x0 deve ter dimensão ({self.nx}, 1)")
@@ -199,13 +195,7 @@ class StateSpace(System):
   # Avaliação interna
   # ===========================================================
 
-  # <<< MUDANÇA 2: Novo método auxiliar para evitar repetição de código >>>
   def _get_simulation_context(self, t: float, x: np.ndarray, u_dict: dict) -> tuple:
-    """
-    Avalia matrizes e vetores necessários para dinâmica e saídas.
-    Retorna (matrices, u_actual, w_actual)
-    """
-    # 1. Obter vetores de entrada, estado e parâmetros
     u_vec = np.hstack(list(u_dict.values())).astype(
         self.dtype) if u_dict else np.zeros((self.nu,), dtype=self.dtype)
 
@@ -220,10 +210,8 @@ class StateSpace(System):
     disturb_dict = dict(
         zip(self.get_labels().get("disturbances", {}).keys(), w_vec))
 
-    # 2. Avaliar todas as matrizes
     matrices = self.evaluate_matrices(state_dict, param_dict, disturb_dict)
 
-    # 3. Formatar vetores de entrada e distúrbio
     u_actual = u_vec.reshape(-1,
                              1) if self.nu > 0 else np.zeros((0, 1), dtype=self.dtype)
     w_actual = w_vec.reshape(-1,
@@ -231,12 +219,7 @@ class StateSpace(System):
 
     return matrices, u_actual, w_actual
 
-  # <<< MUDANÇA 3: Refatorar _dynamics >>>
-
   def _dynamics(self, t: float, x: np.ndarray, u_dict: dict, params=None):
-    # Esta função calcula dx = Ax + Bu + Ew
-    # (Usa 'self.states' como a fonte da verdade para 'x')
-
     matrices, u_actual, w_actual = self._get_simulation_context(
         t, self.states, u_dict)
 
@@ -247,37 +230,134 @@ class StateSpace(System):
     dx = A @ self.states + B @ u_actual + E @ w_actual
     return dx
 
-  # <<< MUDANÇA 4: Refatorar _output_func >>>
   def _output_func(self, t: float, x: np.ndarray, u_dict: dict):
-    # Calcula a saída de medição y = C*x + D*u
-    # (Usa 'x' passado como argumento, que é o estado atual do solver)
-
     matrices, u_actual, _ = self._get_simulation_context(t, x, u_dict)
-
     C = matrices.get("C", np.zeros((self.ny, self.nx), dtype=self.dtype))
     D = matrices.get("D", np.zeros((self.ny, self.nu), dtype=self.dtype))
-
     y = C @ x + D @ u_actual
     return y
 
-  # <<< MUDANÇA 5: Novo método para saída de desempenho >>>
   def get_performance_output(self, t: float, x: np.ndarray, u_dict: dict) -> np.ndarray:
     """Calcula a saída de desempenho z = Cz*x + Dz*u."""
-
     matrices, u_actual, _ = self._get_simulation_context(t, x, u_dict)
-
     Cz = matrices.get("Cz", np.zeros((self.nz, self.nx), dtype=self.dtype))
     Dz = matrices.get("Dz", np.zeros((self.nz, self.nu), dtype=self.dtype))
-
     z = Cz @ x + Dz @ u_actual
     return z
+
+  # <<< MUDANÇA: Nova seção para gerar LaTeX >>>
+  # ===========================================================
+  # Representação LaTeX
+  # ===========================================================
+
+  def _format_latex_symbol(self, s: str) -> str:
+    """Formata uma string simbólica para LaTeX."""
+    # Converte 'p1' em 'p_{1}', 'x10' em 'x_{10}', etc.
+    s_tex = re.sub(r"([a-zA-Z])(\d+)", r"\1_{\2}", s)
+
+    # Converte funções matemáticas
+    s_tex = s_tex.replace("*", r" \cdot ")
+    s_tex = s_tex.replace("math.cos", r"\cos")
+    s_tex = s_tex.replace("math.sin", r"\sin")
+    s_tex = s_tex.replace("math.exp", r"\exp")
+    s_tex = s_tex.replace("math.pi", r"\pi")
+    return s_tex
+
+  def _build_latex_vector(self, label_keys: list, is_derivative=False) -> str:
+    """Cria um vetor em LaTeX (ex: bmatrix) a partir de uma lista de labels."""
+    if not label_keys:
+      return ""
+
+    prefix = r"\dot{" if is_derivative else ""
+    suffix = "}" if is_derivative else ""
+
+    elements = []
+    for key in label_keys:
+      # Formata o label (ex: 'x1' -> 'x_{1}')
+      formatted_key = re.sub(r"([a-zA-Z])(\d+)", r"\1_{\2}", key)
+      elements.append(f"{prefix}{formatted_key}{suffix}")
+
+    body = r" \\ ".join(elements)
+    return rf"\begin{{bmatrix}} {body} \end{{bmatrix}}"
+
+  def _build_latex_matrix(self, matrix_key: str) -> str:
+    """Cria uma matriz em LaTeX (ex: bmatrix) a partir de uma chave de matriz."""
+    matrix_expr = self.matrices_exprs.get(matrix_key)
+
+    # Se a matriz não estiver definida (ex: D=0), retorna a letra em negrito
+    if not matrix_expr:
+      return rf"\mathbf{{{matrix_key}}}"
+
+    rows_tex = []
+    for row in matrix_expr:
+      # Formata cada elemento da linha
+      elements_tex = [self._format_latex_symbol(el) for el in row]
+      rows_tex.append(" & ".join(elements_tex))
+
+    body = r" \\ ".join(rows_tex)
+    return rf"\begin{{bmatrix}} {body} \end{{bmatrix}}"
+
+  def get_latex_equations(self) -> str:
+    """
+    Retorna as equações de estado simbólicas formatadas em LaTeX.
+    """
+    # 1. Obter listas de labels
+    state_labels = list(self.get_labels().get("states", {}).keys())
+    input_labels = list(self.get_labels().get("inputs", {}).keys())
+    disturb_labels = list(self.get_labels().get("disturbances", {}).keys())
+    output_labels = list(self.get_labels().get("outputs", {}).keys())
+    perf_labels = list(self.get_labels().get("performance_outputs", {}).keys())
+
+    # 2. Construir todos os vetores LaTeX
+    x_dot_vec = self._build_latex_vector(state_labels, is_derivative=True)
+    x_vec = self._build_latex_vector(state_labels)
+    u_vec = self._build_latex_vector(input_labels)
+    w_vec = self._build_latex_vector(disturb_labels)
+    y_vec = self._build_latex_vector(output_labels)
+    z_vec = self._build_latex_vector(perf_labels)
+
+    # 3. Construir todas as matrizes LaTeX
+    A_mat = self._build_latex_matrix("A")
+    B_mat = self._build_latex_matrix("B")
+    E_mat = self._build_latex_matrix("E")
+    C_mat = self._build_latex_matrix("C")
+    D_mat = self._build_latex_matrix("D")
+    Cz_mat = self._build_latex_matrix("Cz")
+    Dz_mat = self._build_latex_matrix("Dz")
+
+    # 4. Montar as equações
+    eqs = []
+
+    # Equação de estado
+    dyn_eq = [rf"{A_mat} {x_vec}"]
+    if self.nu > 0:
+      dyn_eq.append(rf"+ {B_mat} {u_vec}")
+    if self.nw > 0:
+      dyn_eq.append(rf"+ {E_mat} {w_vec}")
+    eqs.append(rf"{x_dot_vec} &= {' '.join(dyn_eq)}")
+
+    # Equação de saída (medição)
+    if self.ny > 0:
+      y_eq = [rf"{C_mat} {x_vec}"]
+      if self.nu > 0:
+        y_eq.append(rf"+ {D_mat} {u_vec}")
+      eqs.append(rf"{y_vec} &= {' '.join(y_eq)}")
+
+    # Equação de saída (desempenho)
+    if self.nz > 0:
+      z_eq = [rf"{Cz_mat} {x_vec}"]
+      if self.nu > 0:
+        z_eq.append(rf"+ {Dz_mat} {u_vec}")
+      eqs.append(rf"{z_vec} &= {' '.join(z_eq)}")
+
+    # 5. Juntar tudo em um ambiente 'align*'
+    body = r" \\ ".join(eqs)
+    return rf"\begin{{align*}} {body} \end{{align*}}"
 
   # ===========================================================
   # Avaliação de expressões
   # ===========================================================
-  # ... (métodos 'evaluate_expr', 'evaluate_parameters', 'evaluate_disturbances',
-  #      'evaluate_matrices' e 'matrices_func' permanecem inalterados) ...
-
+  # ... (resto da classe permanece igual) ...
   def evaluate_expr(self, code, context: dict) -> float:
     return eval(code, self.safe_globals, context)
 
