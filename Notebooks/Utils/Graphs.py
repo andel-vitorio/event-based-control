@@ -471,3 +471,88 @@ def create_custom_legend(
     handles.append(handle)
 
   ax.legend(handles, labels, fontsize=fontsize, loc=loc, frameon=frameon)
+
+
+def _solve_intersection(A_inv, C):
+  """
+  Auxiliary function to compute the intersection point x = A_inv * C.
+
+  Parameters
+  ----------
+  A_inv : np.ndarray
+      Inverse of the 2×2 coefficient matrix A.
+  C : np.ndarray
+      Right-hand side vector of shape (2,).
+
+  Returns
+  -------
+  np.ndarray
+      Flattened intersection point [x1, x2].
+  """
+  x = A_inv @ C.reshape(2, 1)
+  return x.flatten()
+
+
+def get_parallelogram2D_vertices(H1, H2, mag):
+  """
+  Computes the four ordered vertices of a 2D parallelogram formed
+  by the intersection of two directional constraint sets (corridors).
+
+  Parameters
+  ----------
+  H1 : np.ndarray
+      First direction vector (1×2 or 2×1) defining a pair of parallel lines.
+  H2 : np.ndarray
+      Second direction vector (1×2 or 2×1) defining another pair of parallel lines.
+  mag : float
+      Magnitude that defines the distance of each parallel line from the origin.
+
+  Returns
+  -------
+  tuple[np.ndarray, np.ndarray]
+      ordered_vertices : np.ndarray
+          Array with the four 2D vertices ordered counterclockwise.
+      centroid : np.ndarray
+          Centroid (geometric center) of the parallelogram.
+
+  Notes
+  -----
+  - The parallelogram is defined by the intersections of the four combinations
+    of the lines H1·x = ±u_bar and H2·x = ±u_bar.
+  - Vertices are ordered based on their polar angles relative to the centroid.
+  """
+  # 1. Build the coefficient matrix A
+  A = np.array([H1.flatten(), H2.flatten()])
+
+  # 2. Check if the two lines are parallel (determinant ≈ 0)
+  det_A = np.linalg.det(A)
+  if np.abs(det_A) < 1e-9:
+    print(f"Error: The lines defined by H1={H1} and H2={H2} are parallel.")
+    return None, None
+
+  # 3. Compute the inverse of A
+  A_inv = np.linalg.inv(A)
+
+  # 4. Define the four right-hand side vectors (line offsets)
+  C_vectors = [
+      np.array([mag, mag]),
+      np.array([mag, -mag]),
+      np.array([-mag, mag]),
+      np.array([-mag, -mag])
+  ]
+
+  # 5. Compute the four intersection points (vertices)
+  vertices = np.array([
+      _solve_intersection(A_inv, C_vectors[0]),
+      _solve_intersection(A_inv, C_vectors[1]),
+      _solve_intersection(A_inv, C_vectors[2]),
+      _solve_intersection(A_inv, C_vectors[3])
+  ])
+
+  # 6. Order vertices counterclockwise
+  centroid = vertices.mean(axis=0)
+  angles = np.arctan2(vertices[:, 1] - centroid[1],
+                      vertices[:, 0] - centroid[0])
+  ordered_vertices = vertices[np.argsort(angles)]
+
+  return ordered_vertices, centroid
