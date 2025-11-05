@@ -6,6 +6,17 @@ import Numeric as nm
 from DynamicSystem import *
 
 
+def get_iet(event_time):
+  if len(event_time) == 0:
+    inter_event_time = np.array([])
+  else:
+    inter_event_time = np.empty_like(event_time)
+    inter_event_time[0] = event_time[0]
+    inter_event_time[1:] = event_time[1:] - event_time[:-1]
+
+  return inter_event_time
+
+
 def detm_synthesis(
     plant_data: Dict[str, Any],
     design_params: Dict[str, float],
