@@ -1,3 +1,4 @@
+from typing import Optional, Sequence, Tuple, Dict, Any, Union
 from matplotlib.ticker import FuncFormatter
 from typing import Any, Dict, Optional, Tuple
 import math
@@ -39,7 +40,7 @@ def plot(
     xlabel: Optional[str] = None,
     ylabel: Optional[str] = None,
     title: Optional[str] = None,
-    label: str = '',
+    label: Union[str, Sequence[str], None] = '',
     cfg: Dict[str, Any] = {},
     *,
     x_unit: str = '',
@@ -48,22 +49,44 @@ def plot(
     y_use_prefixes: bool = False,
     x_pad: Tuple[float, float] = (0.0, 0.0),
     y_pad: Tuple[float, float] = (0.0, 0.0),
-    # --- MUDANÇA NA ASSINATURA ---
-    # Agora a tupla externa sempre existe, mas os
-    # elementos *dentro* dela podem ser None.
-    prev_format: Tuple[
-        Optional[Tuple[np.ndarray, str, Optional[int], int]],
-        Optional[Tuple[np.ndarray, str, Optional[int], int]]
-    ] = (None, None)  # O padrão é (auto, auto)
 ):
+  """
+  Plot one or multiple curves on the same axis.
+
+  y_data can be a single array or a list/tuple of arrays.
+  label can be a string or list of strings.
+  All curves share the same scaling and axis configuration.
+  """
+
+  # --- detect single or multi-curve mode ---
+  if not isinstance(y_data, (list, tuple, np.ndarray)) or (
+          isinstance(y_data, np.ndarray) and y_data.ndim == 1):
+    y_data = [y_data]
+  if isinstance(label, str) or label is None:
+    label = [label] * len(y_data)
+  elif len(label) < len(y_data):
+    label = list(label) + [''] * (len(y_data) - len(label))
+
   style = cfg.get('style', {})
   axis = cfg.get('axis', {})
   legend_cfg = cfg.get('legend', {})
 
-  # ... (configurações de estilo, labels, etc. permanecem iguais) ...
-  color = style.get('color', 'black')
-  linewidth = style.get('linewidth', 1.67)
-  linestyle = style.get('linestyle', '-')
+  # --- normalize style parameters ---
+  def normalize_style_param(param, n_curves):
+    """Repeat or distribute style parameters correctly."""
+    if isinstance(param, (list, tuple, np.ndarray)):
+      # Detect if this is a single RGB(A) color, not a list of colors
+      if len(param) in (3, 4) and all(isinstance(x, (int, float)) for x in param):
+        return [param] * n_curves
+      return list(param) if len(param) == n_curves else [param[0]] * n_curves
+    else:
+      return [param] * n_curves
+
+  n_curves = len(y_data)
+  colors = normalize_style_param(style.get('color', 'black'), n_curves)
+  linestyles = normalize_style_param(style.get('linestyle', '-'), n_curves)
+  linewidths = normalize_style_param(style.get('linewidth', 1.67), n_curves)
+
   x_label_fontsize = axis.get('x_label_fontsize', 16)
   y_label_fontsize = axis.get('y_label_fontsize', 16)
   tick_fontsize = axis.get('tick_fontsize', 16)
@@ -71,6 +94,7 @@ def plot(
   y_label_pad = axis.get('y_label_pad', 8)
   title_pad = axis.get('title_pad', 20)
 
+  # --- helper: padding ---
   def apply_padding(values, pad):
     vmin, vmax = np.min(values), np.max(values)
     if vmin == vmax:
@@ -79,99 +103,39 @@ def plot(
     vrange = vmax - vmin
     return vmin - pad[0]*vrange, vmax + pad[1]*vrange
 
+  # --- prepare data ---
   x_arr = np.asarray(x_data, dtype=float)
-  y_arr = np.asarray(y_data, dtype=float)
+  y_arrays = [np.asarray(y, dtype=float) for y in y_data]
+  all_y_values = np.concatenate(y_arrays)
 
-  # --- LÓGICA DE ESCALA (REFEITA) ---
-
-  # 1. Sempre calculamos o formato "novo" (baseado nos dados atuais)
-  fx_new = format_magnitudes(
+  # --- compute scaling (shared across curves) ---
+  scaled_x, x_label, x_order = format_magnitudes(
       x_arr, x_unit, x_use_prefixes, return_order=True)
-  scaled_x_new, x_label_new, x_order_new = fx_new
+  scaled_y_all, y_label, y_order = format_magnitudes(
+      all_y_values, y_unit, y_use_prefixes, return_order=True)
 
-  fy_new = format_magnitudes(
-      y_arr, y_unit, y_use_prefixes, return_order=True)
-  scaled_y_new, y_label_new, y_order_new = fy_new
+  scale_factor_y = 10 ** (-y_order)
+  scale_factor_x = 10 ** (-x_order)
+  scaled_x = np.asarray(x_data, dtype=float) * scale_factor_x
 
-  # 2. Desempacotamos o formato anterior
-  prev_x_fmt, prev_y_fmt = prev_format
+  # --- plot all curves ---
+  lines = []
+  for i, y_arr in enumerate(y_arrays):
+    scaled_y = np.asarray(y_arr, dtype=float) * scale_factor_y
+    line = ax.plot(
+        scaled_x, scaled_y,
+        label=label[i],
+        color=colors[i],
+        linewidth=linewidths[i],
+        linestyle=linestyles[i],
+    )
+    lines += line
 
-  # 3. Processamos o Eixo X
-  if prev_x_fmt is None:
-    # X é automático: o formato final é o formato novo
-    x_label = x_label_new
-    x_order_final = x_order_new
-    # Os "dados anteriores" para limites são nulos
-    prev_x_data_for_limits = np.array([])
-  else:
-    # X está travado: o formato final é o formato anterior
-    (prev_scaled_x_data, x_label, x_order_final) = prev_x_fmt
-    # Os "dados anteriores" para limites são os dados do formato
-    prev_x_data_for_limits = prev_scaled_x_data
+  # --- set limits ---
+  ax.set_xlim(apply_padding(scaled_x, x_pad))
+  ax.set_ylim(apply_padding(scaled_y_all, y_pad))
 
-  # 4. Processamos o Eixo Y
-  if prev_y_fmt is None:
-    # Y é automático: o formato final é o formato novo
-    y_label = y_label_new
-    y_order_final = y_order_new
-    prev_y_data_for_limits = np.array([])
-  else:
-    # Y está travado: o formato final é o formato anterior
-    (prev_scaled_y_data, y_label, y_order_final) = prev_y_fmt
-    prev_y_data_for_limits = prev_scaled_y_data
-
-  # 5. Aplicamos a escala final aos dados novos
-  # (Tratamento especial para dados planos)
-  if np.allclose(np.ptp(x_arr), 0):
-    scaled_x_new = x_arr
-    x_order_new = 0  # Força o expoente a 0
-  if np.allclose(np.ptp(y_arr), 0):
-    scaled_y_new = y_arr
-    y_order_new = 0  # Força o expoente a 0
-
-  # `scaled_x/y` são os dados atuais, escalados para o formato final
-  scaled_x = np.asarray(scaled_x_new) * 10**(x_order_new - x_order_final)
-  scaled_y = np.asarray(scaled_y_new) * 10**(y_order_new - y_order_final)
-
-  # (Evita falha no plot/limite se os dados escalados forem planos)
-  if np.ptp(scaled_x) == 0:
-    scaled_x = scaled_x + 1e-12 * 10**x_order_final
-  if np.ptp(scaled_y) == 0:
-    scaled_y = scaled_y + 1e-12 * 10**y_order_final
-
-  # --- FIM DA LÓGICA DE ESCALA ---
-
-  # (Bloco do FuncFormatter foi removido em etapas anteriores)
-
-  line, = ax.plot(scaled_x, scaled_y, label=label, color=color,
-                  linewidth=linewidth, linestyle=linestyle)
-
-  # --- LÓGICA DE LIMITES (REFEITA) ---
-
-  # 6. Concatenamos os dados anteriores (já escalados) com os novos (agora escalados)
-  all_scaled_x_data = np.concatenate([prev_x_data_for_limits, scaled_x])
-  all_scaled_y_data = np.concatenate([prev_y_data_for_limits, scaled_y])
-
-  # 7. Aplicamos os limites baseados em TODOS os dados
-  x_min = float(np.min(all_scaled_x_data))
-  x_max = float(np.max(all_scaled_x_data))
-  y_min = float(np.min(all_scaled_y_data))
-  y_max = float(np.max(all_scaled_y_data))
-
-  ax.margins(0)
-  ax.set_xlim(apply_padding((x_min, x_max), x_pad))
-  ax.set_ylim(apply_padding((y_min, y_max), y_pad))
-
-  # --- FIM DA LÓGICA DE LIMITES ---
-
-  # --- (Localizador de Ticks) ---
-  # (Como na versão anterior, deixamos o Matplotlib escolher)
-  ax.xaxis.set_major_locator(
-      MaxNLocator(nbins='auto', prune=None))
-  ax.yaxis.set_major_locator(
-      MaxNLocator(nbins='auto', prune=None))
-
-  # ... (labels, grid, legend, etc. permanecem iguais) ...
+  # --- labels and style ---
   if xlabel is not None:
     ax.set_xlabel(xlabel + x_label, fontsize=x_label_fontsize,
                   labelpad=x_label_pad)
@@ -185,23 +149,17 @@ def plot(
   ax.tick_params(axis='both', direction='in', length=4, width=1,
                  colors='black', top=True, right=True, labelsize=tick_fontsize)
 
-  if label:
+  # --- legend ---
+  if any(label):
     legend_size = legend_cfg.get('fontsize', 12)
     legend_ncol = legend_cfg.get('ncol', 1)
     legend_loc = legend_cfg.get('loc', 'best')
     ax.legend(frameon=True, loc=legend_loc, ncol=legend_ncol,
               framealpha=1, prop={'size': legend_size})
 
-  # 8. Preparamos o formato de RETORNO
-  # O formato de retorno deve conter TODOS os dados (anteriores + atuais)
-  # na escala final, para ser usado na *próxima* chamada.
-  fmt_x_out = (all_scaled_x_data, x_label, x_order_final)
-  fmt_y_out = (all_scaled_y_data, y_label, y_order_final)
-
-  # Retornamos o formato completo para ambos os eixos
-  fmt = (fmt_x_out, fmt_y_out)
-
-  return line, fmt
+  fmt_x_out = (scaled_x, x_label, x_order)
+  fmt_y_out = (scaled_y_all, y_label, y_order)
+  return lines, (fmt_x_out, fmt_y_out)
 
 
 def stem(ax: Axes,

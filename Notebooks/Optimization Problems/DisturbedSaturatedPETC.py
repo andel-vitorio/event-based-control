@@ -346,4 +346,4 @@ class DETM(System):
     return dη
 
   def _output_func(self, t: float, η: np.ndarray, inputs: dict):
-    pass
+    return η

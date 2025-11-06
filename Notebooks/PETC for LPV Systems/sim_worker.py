@@ -115,9 +115,10 @@ def run_simulation(idx, config, results):
     event_time = np.array(event_time)
     ncs.finalize_history()
     plant_output = ncs.output_history['plant']
+    eta = ncs.output_history['DETM']
     time_history = ncs.time_history
 
-    return (idx, plant_output, time_history, signal_control, event_time)
+    return (idx, plant_output, time_history, signal_control, eta, event_time)
 
   except Exception as e:
     tb_str = traceback.format_exc()
