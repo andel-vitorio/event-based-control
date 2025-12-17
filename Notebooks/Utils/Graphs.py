@@ -33,133 +33,137 @@ def use_latex():
     print("LaTeX is not available. Using default fonts.")
 
 
-def plot(
-    ax: Axes,
-    x_data,
-    y_data,
-    xlabel: Optional[str] = None,
-    ylabel: Optional[str] = None,
-    title: Optional[str] = None,
-    label: Union[str, Sequence[str], None] = '',
-    cfg: Dict[str, Any] = {},
-    *,
-    x_unit: str = '',
-    y_unit: str = '',
-    x_use_prefixes: bool = False,
-    y_use_prefixes: bool = False,
-    x_pad: Tuple[float, float] = (0.0, 0.0),
-    y_pad: Tuple[float, float] = (0.0, 0.0),
-):
-  """
-  Plot one or multiple curves on the same axis.
+def plot(ax, x_data, y_data,
+         xlabel=None, ylabel=None, title=None, label='',
+         cfg={}, *,
+         x_unit='', y_unit='',
+         x_use_prefixes=False, y_use_prefixes=False,
+         x_pad=(0.0, 0.0), y_pad=(0.0, 0.0)):
 
-  y_data can be a single array or a list/tuple of arrays.
-  label can be a string or list of strings.
-  All curves share the same scaling and axis configuration.
-  """
+  import numpy as np
 
-  # --- detect single or multi-curve mode ---
-  if not isinstance(y_data, (list, tuple, np.ndarray)) or (
-          isinstance(y_data, np.ndarray) and y_data.ndim == 1):
-    y_data = [y_data]
-  if isinstance(label, str) or label is None:
-    label = [label] * len(y_data)
-  elif len(label) < len(y_data):
-    label = list(label) + [''] * (len(y_data) - len(label))
-
-  style = cfg.get('style', {})
-  axis = cfg.get('axis', {})
-  legend_cfg = cfg.get('legend', {})
-
-  # --- normalize style parameters ---
-  def normalize_style_param(param, n_curves):
-    """Repeat or distribute style parameters correctly."""
-    if isinstance(param, (list, tuple, np.ndarray)):
-      # Detect if this is a single RGB(A) color, not a list of colors
-      if len(param) in (3, 4) and all(isinstance(x, (int, float)) for x in param):
-        return [param] * n_curves
-      return list(param) if len(param) == n_curves else [param[0]] * n_curves
+  # normalizar curvas
+  if isinstance(y_data, (list, tuple)):
+    if len(y_data) > 0 and not isinstance(y_data[0], (list, tuple, np.ndarray)):
+      y_arrays = [np.asarray(y_data, dtype=float).ravel()]
     else:
-      return [param] * n_curves
+      y_arrays = [np.asarray(y, dtype=float).ravel() for y in y_data]
+  else:
+    y_arrays = [np.asarray(y_data, dtype=float).ravel()]
 
-  n_curves = len(y_data)
-  colors = normalize_style_param(style.get('color', 'black'), n_curves)
-  linestyles = normalize_style_param(style.get('linestyle', '-'), n_curves)
-  linewidths = normalize_style_param(style.get('linewidth', 1.67), n_curves)
+  # x em 1D
+  x_arr = np.asarray(x_data, dtype=float).ravel()
 
-  x_label_fontsize = axis.get('x_label_fontsize', 16)
-  y_label_fontsize = axis.get('y_label_fontsize', 16)
-  tick_fontsize = axis.get('tick_fontsize', 16)
-  x_label_pad = axis.get('x_label_pad', 8)
-  y_label_pad = axis.get('y_label_pad', 8)
-  title_pad = axis.get('title_pad', 20)
+  # remover curvas inconsistentes
+  y_arrays = [y for y in y_arrays if y.size == x_arr.size]
 
-  # --- helper: padding ---
-  def apply_padding(values, pad):
-    vmin, vmax = np.min(values), np.max(values)
-    if vmin == vmax:
-      vrange = max(abs(vmin) * 0.01, 1e-12)
-      return vmin - vrange, vmax + vrange
-    vrange = vmax - vmin
-    return vmin - pad[0]*vrange, vmax + pad[1]*vrange
+  if len(y_arrays) == 0:
+    return [], None
 
-  # --- prepare data ---
-  x_arr = np.asarray(x_data, dtype=float)
-  y_arrays = [np.asarray(y, dtype=float) for y in y_data]
-  all_y_values = np.concatenate(y_arrays)
-
-  # --- compute scaling (shared across curves) ---
-  scaled_x, x_label, x_order = format_magnitudes(
+  # aplicar format_magnitudes em x
+  scaled_x, x_label_suffix, x_order = format_magnitudes(
       x_arr, x_unit, x_use_prefixes, return_order=True)
-  scaled_y_all, y_label, y_order = format_magnitudes(
+
+  # concatenar y e formatar
+  all_y_values = np.concatenate(y_arrays)
+  scaled_y_all, y_label_suffix, y_order = format_magnitudes(
       all_y_values, y_unit, y_use_prefixes, return_order=True)
 
-  scale_factor_y = 10 ** (-y_order)
-  scale_factor_x = 10 ** (-x_order)
-  scaled_x = np.asarray(x_data, dtype=float) * scale_factor_x
+  scaled_x = np.asarray(scaled_x, dtype=float)
+  scaled_y_all = np.asarray(scaled_y_all, dtype=float)
 
-  # --- plot all curves ---
+  scale_factor_y = 10 ** (-y_order)
+
+  # configurações
+  style = cfg.get('style', {})
+  axis_cfg = cfg.get('axis', {})
+  legend_cfg = cfg.get('legend', {})
+
+  def normalize(param, n):
+    if isinstance(param, (list, tuple, np.ndarray)):
+      if len(param) in (3, 4) and all(isinstance(x, (float, int)) for x in param):
+        return [param] * n
+      if len(param) == n:
+        return list(param)
+      return [param[0]] * n
+    return [param] * n
+
+  n_curves = len(y_arrays)
+  labels = label if isinstance(label, (list, tuple)) else [label] * n_curves
+  colors = normalize(style.get('color', 'black'), n_curves)
+  linestyles = normalize(style.get('linestyle', '-'), n_curves)
+  linewidths = normalize(style.get('linewidth', 1.67), n_curves)
+
   lines = []
+
+  # plotar
   for i, y_arr in enumerate(y_arrays):
-    scaled_y = np.asarray(y_arr, dtype=float) * scale_factor_y
-    line = ax.plot(
-        scaled_x, scaled_y,
-        label=label[i],
-        color=colors[i],
-        linewidth=linewidths[i],
-        linestyle=linestyles[i],
-    )
+    y_scaled = np.asarray(y_arr, dtype=float) * scale_factor_y
+    line = ax.plot(scaled_x, y_scaled,
+                   label=labels[i],
+                   color=colors[i],
+                   linewidth=linewidths[i],
+                   linestyle=linestyles[i])
     lines += line
 
-  # --- set limits ---
+  # função de padding
+  def apply_padding(vals, pad):
+    vmin, vmax = float(np.min(vals)), float(np.max(vals))
+    if np.isclose(vmin, vmax):
+      return vmin - 1e-3, vmax + 1e-3
+    vr = vmax - vmin
+    return vmin - pad[0] * vr, vmax + pad[1] * vr
+
+  # limites Y
+  if np.isclose(np.min(all_y_values), np.max(all_y_values)):
+    const_scaled = scaled_y_all[0]
+    delta = max(abs(const_scaled) * 0.1, 1e-3)
+    ax.set_ylim(const_scaled - delta, const_scaled + delta)
+  else:
+    ax.set_ylim(apply_padding(scaled_y_all, y_pad))
+
+  # limites X
   ax.set_xlim(apply_padding(scaled_x, x_pad))
-  ax.set_ylim(apply_padding(scaled_y_all, y_pad))
 
-  # --- labels and style ---
+  # ---------- RÓTULOS ----------
   if xlabel is not None:
-    ax.set_xlabel(xlabel + x_label, fontsize=x_label_fontsize,
-                  labelpad=x_label_pad)
+    ax.set_xlabel(
+        xlabel + x_label_suffix,
+        fontsize=axis_cfg.get('x_label_fontsize', 16),
+        labelpad=axis_cfg.get('x_label_pad', 8)
+    )
+
   if ylabel is not None:
-    ax.set_ylabel(ylabel + y_label, fontsize=y_label_fontsize,
-                  labelpad=y_label_pad)
-  if title is not None:
-    ax.set_title(title, fontsize=tick_fontsize, pad=title_pad)
+    ax.set_ylabel(
+        ylabel + y_label_suffix,
+        fontsize=axis_cfg.get('y_label_fontsize', 16),
+        labelpad=axis_cfg.get('y_label_pad', 8)
+    )
 
+  # ---------- ESTILO ----------
   ax.grid(linestyle='--')
-  ax.tick_params(axis='both', direction='in', length=4, width=1,
-                 colors='black', top=True, right=True, labelsize=tick_fontsize)
+  ax.ticklabel_format(style='plain')
+  ax.get_xaxis().get_major_formatter().set_useOffset(False)
+  ax.get_yaxis().get_major_formatter().set_useOffset(False)
 
-  # --- legend ---
-  if any(label):
-    legend_size = legend_cfg.get('fontsize', 12)
-    legend_ncol = legend_cfg.get('ncol', 1)
-    legend_loc = legend_cfg.get('loc', 'best')
-    ax.legend(frameon=True, loc=legend_loc, ncol=legend_ncol,
-              framealpha=1, prop={'size': legend_size})
+  ax.tick_params(
+      axis='both',
+      direction='in', length=4, width=1,
+      colors='black', top=True, right=True,
+      labelsize=axis_cfg.get('tick_fontsize', 16)
+  )
 
-  fmt_x_out = (scaled_x, x_label, x_order)
-  fmt_y_out = (scaled_y_all, y_label, y_order)
-  return lines, (fmt_x_out, fmt_y_out)
+  if any(labels):
+    ax.legend(
+        frameon=True,
+        loc=legend_cfg.get('loc', 'best'),
+        ncol=legend_cfg.get('ncol', 1),
+        framealpha=1,
+        prop={'size': legend_cfg.get('fontsize', 12)}
+    )
+
+  return lines, ((scaled_x, x_label_suffix, x_order),
+                 (scaled_y_all, y_label_suffix, y_order))
 
 
 def stem(ax: Axes,
