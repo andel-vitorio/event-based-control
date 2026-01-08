@@ -1,2 +1,8 @@
 .vscode/*
 */**/Results
+event_based_control.egg-info/
+build/
+dist/
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints

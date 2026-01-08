@@ -10,7 +10,7 @@ import numpy as np
 from typing import List, Tuple
 from scipy.spatial import ConvexHull
 from IPython.display import display, Math
-from Tex import *
+from .Tex import *
 
 
 def binary_pairs(p: int) -> List[List[Tuple[Tuple[int, ...], Tuple[int, ...]]]]:

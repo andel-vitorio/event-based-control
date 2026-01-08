@@ -10,7 +10,7 @@ from matplotlib.axes import Axes
 from matplotlib.ticker import FuncFormatter, MultipleLocator
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
-from Numeric import format_magnitudes
+from .Numeric import format_magnitudes
 
 
 def use_latex():

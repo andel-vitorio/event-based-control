@@ -5,7 +5,7 @@ import numpy as np
 import math
 from scipy.interpolate import interp1d
 from IPython.display import display, Math
-from Numeric import *
+from .Numeric import *
 import re
 
 

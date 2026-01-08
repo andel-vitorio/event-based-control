@@ -2,8 +2,8 @@ from typing import Optional, Dict, Any
 import itertools
 import cvxpy as cp
 import numpy as np
-import Numeric as nm
-from DynamicSystem import *
+from Utils import Numeric as nm
+from Utils.DynamicSystem import *
 
 
 def get_iet(event_time):

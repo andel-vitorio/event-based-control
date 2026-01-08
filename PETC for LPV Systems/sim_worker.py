@@ -1,21 +1,10 @@
-import DisturbedSaturatedPETC as DSPETC
-import Signal as sgn
-import Numeric as nm
-import DynamicSystem as ds
-import os
-import sys
-import json
-import pickle
+from optimization import DisturbedSaturatedPETC as DSPETC
+from Utils import Signal as sgn
+from Utils import Numeric as nm
+from Utils import DynamicSystem as ds
 import numpy as np
 import traceback
-
-# --- 1. Configuração de Path (da célula [2]) ---
-base_path = os.path.abspath("..")
-dirs_to_add = ["Utils", "Optimization Problems", "DisturbedSaturatedPETC"]
-for d in dirs_to_add:
-  path = os.path.join(base_path, d)
-  if path not in sys.path:
-    sys.path.append(path)
+import functools
 
 # --- 2. Imports Essenciais (da célula [2]) ---
 
@@ -48,10 +37,8 @@ def run_simulation(idx, config, results):
     design_params = config["design_params"]["dspetc"]
 
     # --- CORREÇÃO (Linha 55) ---
-    # u_bar não vem de config["plant"], mas do objeto plant
-    u_bar = plant.get_input_bounds()[0]
-    if not isinstance(u_bar, np.ndarray):
-      u_bar = np.array(u_bar)  # Garante que é um array numpy
+    # Obtém limites de entrada. Removemos [0] para manter compatibilidade com MIMO se necessário
+    u_bar = plant.get_input_bounds()
 
     # --- 6. Setup do Sampler ---
     sampler = ds.Sampler(Ts=design_params['h'])
@@ -62,10 +49,7 @@ def run_simulation(idx, config, results):
 
     # --- 8. Setup do Controlador ---
     # --- CORREÇÃO (Linha 65) ---
-    # ρ_bounds também vem do objeto plant
     ρ_bounds = plant.get_parameter_bounds()
-    if not isinstance(ρ_bounds, np.ndarray):
-      ρ_bounds = np.array(ρ_bounds)  # Garante que é um array numpy
 
     controller = ds.GainScheduledController(K, ρ_bounds)
 
