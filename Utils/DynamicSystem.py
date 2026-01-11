@@ -37,7 +37,7 @@ def create_simulation_id(plant_object, design_params_dict) -> str:
 
   Args:
       plant_object: A instância da sua classe StateSpace (que contém .system_data).
-      design_params_dict: O dicionário com os parâmetros de projeto (h, υ, etc.).
+      design_params_dict: O dicionário com os parâmetros de projeto (h, v, etc.).
 
   Returns:
       Uma string de hash MD5 (ex: "sim_a1b2c3d4...")
@@ -72,7 +72,7 @@ def create_simulation_id(plant_object, design_params_dict) -> str:
 
 
 class System:
-  """Generic system node for NCS simulation."""
+  """Generic system node for simulation."""
 
   def __init__(self, name: str, x0: Optional[np.ndarray] = None,
                dynamics: Optional[Callable] = None,
@@ -113,7 +113,7 @@ class StateSpace(System):
 
     labels = self.get_labels()
     self.nu = len(labels.get("inputs", []))
-    self.nρ = len(labels.get("parameters", []))
+    self.n_rho = len(labels.get("parameters", []))
     self.nw = len(labels.get("disturbances", []))
     self.nx = len(labels.get("states", []))
     self.ny = len(labels.get("outputs", []))
@@ -169,7 +169,7 @@ class StateSpace(System):
     return np.array(u_b, dtype=self.dtype).reshape(-1, 1)
 
   def get_parameter_bounds(self) -> np.ndarray:
-    p_b = self.bounds.get("ρ", [])
+    p_b = self.bounds.get("\u03c1", [])
     return np.array(p_b, dtype=self.dtype)
 
   def get_disturbance_l2_norm_bound(self) -> np.ndarray:
@@ -202,11 +202,11 @@ class StateSpace(System):
     state_labels = list(self.get_labels().get("states", {}).keys())
     state_dict = dict(zip(state_labels, x.flatten()))
 
-    ρ_vec = self.evaluate_parameters(t, state_dict)
+    rho_vec = self.evaluate_parameters(t, state_dict)
     w_vec = self.evaluate_disturbances(t, state_dict)
 
     param_dict = dict(
-        zip(self.get_labels().get("parameters", {}).keys(), ρ_vec))
+        zip(self.get_labels().get("parameters", {}).keys(), rho_vec))
     disturb_dict = dict(
         zip(self.get_labels().get("disturbances", {}).keys(), w_vec))
 
@@ -392,14 +392,14 @@ class StateSpace(System):
       )
     return evaluated
 
-  def matrices_func(self, ρi):
+  def matrices_func(self, rho_i):
     """
-    Recebe ρi: lista de valores dos parâmetros no vértice
+    Recebe rho_i: lista de valores dos parâmetros no vértice
     Retorna dicionário com todas as matrizes (A, B, C, D, E, Cz, Dz...)
     """
     labels = self.get_labels()
     param_names = labels.get("parameters", [])
-    param_dict = dict(zip(param_names, ρi))
+    param_dict = dict(zip(param_names, rho_i))
 
     matrices = self.evaluate_matrices(
         state_dict=None, param_vals=param_dict, disturb_vals={})
@@ -413,8 +413,8 @@ class _SimulationStep:
   um único passo de simulação.
   """
 
-  def __init__(self, ncs_instance, default_inputs=None):
-    self.ncs = ncs_instance
+  def __init__(self, sim_instance, default_inputs=None):
+    self.sim = sim_instance
     if default_inputs is None:
       self.inputs = {}
     else:
@@ -425,11 +425,11 @@ class _SimulationStep:
 
   def __exit__(self, exc_type, exc_value, traceback):
     if exc_type is None:
-      self.ncs.update_systems(self.inputs)
+      self.sim.update_systems(self.inputs)
     return False
 
 
-class NetworkedControlSystem:
+class SimulationEngine:
   def __init__(self, dtype=np.float32):
     self.systems = {}
     self.dtype = dtype
@@ -498,7 +498,7 @@ class NetworkedControlSystem:
 
   def get_system(self, system_name: str):
     if system_name not in self.systems:
-      raise ValueError(f"Sistema '{system_name}' não está na rede.")
+      raise ValueError(f"Sistema '{system_name}' não está na simulação.")
     return self.systems[system_name]
 
   def reset_clock(self):
@@ -510,19 +510,26 @@ class NetworkedControlSystem:
 
 class Sampler:
   """
-  Sampler clock for NCS. Returns True at sampling instants.
+  Sampler clock for simulation. Returns True at sampling instants.
   """
 
-  def __init__(self, Ts: float, dtype=np.float32):
+  def __init__(self, Ts: float, time_source: Optional[Callable[[], float]] = None, dtype=np.float32):
     self.Ts = dtype(Ts)
     self.dtype = dtype
     self.last_sample_time = self.dtype(-Ts)
+    self.time_source = time_source
 
-  def check(self, t: float) -> bool:
+  def check(self, t: Optional[float] = None) -> bool:
     """
     Call at each simulation step.
     Returns True if a new sample occurs at time t.
     """
+    if t is None:
+      if self.time_source is None:
+        raise ValueError(
+            "Time 't' must be provided if 'time_source' is not set.")
+      t = self.time_source()
+
     if t - self.last_sample_time >= self.Ts - np.finfo(self.dtype).eps:
       self.last_sample_time = t
       return True
@@ -547,7 +554,7 @@ class GainScheduledController:
       Dictionary mapping vertex tuples to gain matrices.
       Example: {(0, 0): K00, (0, 1): K01, (1, 0): K10, (1, 1): K11}
   rho_bounds : list of tuples
-      Bounds for each scheduling parameter [(ρ_min₁, ρ_max₁), ..., (ρ_minₙ, ρ_maxₙ)].
+      Bounds for each scheduling parameter [(rho_min_1, rho_max_1), ..., (rho_min_n, rho_max_n)].
   """
 
   def __init__(self, K, rho_bounds):

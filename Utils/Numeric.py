@@ -538,7 +538,7 @@ class StateSpaceSystem:
 
     labels = self.get_labels()
     self.nu = len(labels.get("inputs", []))
-    self.nρ = len(labels.get("parameters", []))
+    self.n_rho = len(labels.get("parameters", []))
     self.nw = len(labels.get("disturbances", []))
     self.nx = len(labels.get("states", []))
 
@@ -638,20 +638,20 @@ class StateSpaceSystem:
     return self.system_data.get("labels", {})
 
   def get_rho_bounds(self) -> list[list[float]]:
-    """Retorna os limites dos parâmetros ρ no formato [[ρ1_min, ρ1_max], ..., [ρn_min, ρn_max]]"""
+    """Retorna os limites dos parâmetros rho no formato [[rho1_min, rho1_max], ..., [rhon_min, rhon_max]]"""
     labels = self.get_labels().get("parameters", {})
     param_keys = list(labels.keys())
 
     bounds_list = []
 
-    # Caso 1: Limites globais em self.system_data["bounds"]["ρ"] (índices como "1", "2", ...)
-    rho_bounds_dict = self.system_data.get("bounds", {}).get("ρ", None)
+    # Caso 1: Limites globais em self.system_data["bounds"]["rho"] (índices como "1", "2", ...)
+    rho_bounds_dict = self.system_data.get("bounds", {}).get("\u03c1", None)
     if rho_bounds_dict is not None:
       for i in range(1, len(param_keys) + 1):
         bound = rho_bounds_dict.get(str(i), None)
         if bound is None:
           raise ValueError(
-              f"Limite do parâmetro ρ com índice '{i}' não encontrado.")
+              f"Limite do parâmetro rho com índice '{i}' não encontrado.")
         bounds_list.append(bound)
       return bounds_list
 
