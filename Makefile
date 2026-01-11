@@ -12,7 +12,7 @@ help:
 
 save:
 	git add .
-	git commit -m "$(MSG)"
+	git commit -m "$(MSG)" || echo "Nenhuma alteração para salvar."
 
 sync: save
 	git push origin $(BRANCH)

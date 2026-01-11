@@ -6,28 +6,19 @@ import numpy as np
 import traceback
 import functools
 
-# --- 2. Imports Essenciais (da célula [2]) ---
 
-# --- A função ainda recebe config e results ---
-
-
-def run_simulation(idx, config, results):
+def run_simulation(x0, config, results):
   """
-  Executa uma simulação completa para o 'idx', usando os dados de 
-  'config' e 'results' pré-carregados pelo processo pai.
+  Executa uma simulação completa para o estado inicial 'x0'.
   """
 
   try:
-    # --- 3. Setup da Planta (Usa 'config' do argumento) ---
     plant = ds.StateSpace(data=config["plant"], name='plant')
-
-    # --- 4. Setup do NCS ---
     ncs = ds.NetworkedControlSystem()
     ncs.add_system(plant)
 
-    # --- 5. Carregamento dos Parâmetros (Usa 'results' do argumento) ---
     if results is None:
-      return (idx, f"Erro: Dicionário 'results' está Nulo.", None, None, None)
+      return (f"Erro: Dicionário 'results' está Nulo.", None, None, None, None)
 
     Ξ, Ψ = results['etm']['Ξ'], results['etm']['Ψ']
     θ, λ = results['etm']['θ'], results['etm']['λ']
@@ -35,32 +26,15 @@ def run_simulation(idx, config, results):
     P = results['lyapunov'][0]
 
     design_params = config["design_params"]["dspetc"]
-
-    # --- CORREÇÃO (Linha 55) ---
-    # Obtém limites de entrada. Removemos [0] para manter compatibilidade com MIMO se necessário
     u_bar = plant.get_input_bounds()
-
-    # --- 6. Setup do Sampler ---
     sampler = ds.Sampler(Ts=design_params['h'])
-
-    # --- 7. Setup do DETM ---
     detm = DSPETC.DETM(Ξ=Ξ, Ψ=Ψ, λ=λ, θ=θ)
     ncs.add_system(detm)
-
-    # --- 8. Setup do Controlador ---
-    # --- CORREÇÃO (Linha 65) ---
     ρ_bounds = plant.get_parameter_bounds()
-
     controller = ds.GainScheduledController(K, ρ_bounds)
 
-    # --- 9. Setup do Estado Inicial (usando 'P' e 'idx') ---
-    X0_list = nm.ellipsoid_boundary_points(P, 1, 20)
-    x0 = []
-    for i in range(plant.nx):
-      x0 += [[X0_list[i][idx]]]
-    x0 = np.array(x0, dtype=np.float32)
+    x0 = np.array(x0, dtype=np.float32).reshape(-1, 1)
 
-    # --- 10. Lógica da Simulação ---
     ncs.get_system('plant').set_initial_state(x0)
     detm.set_η0(0.0)
     detm.x_hat = x0.copy()
@@ -90,7 +64,6 @@ def run_simulation(idx, config, results):
         event_time += [ncs.t]
         uc = controller.compute(detm.x_hat, ρ_hat)
 
-    # --- 11. Pós-processamento ---
     signal_control = np.squeeze(np.array(signal_control))
     if signal_control.ndim == 1:
       signal_control = signal_control[np.newaxis, :]
@@ -102,8 +75,8 @@ def run_simulation(idx, config, results):
     eta = ncs.output_history['DETM']
     time_history = ncs.time_history
 
-    return (idx, plant_output, time_history, signal_control, eta, event_time)
+    return (plant_output, time_history, signal_control, eta, event_time)
 
   except Exception as e:
     tb_str = traceback.format_exc()
-    return (idx, f"Erro INESPERADO no idx {idx}: {e}\n{tb_str}", None, None, None)
+    return (f"Erro INESPERADO: {e}\n{tb_str}", None, None, None, None)
