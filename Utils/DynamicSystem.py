@@ -453,12 +453,10 @@ class SimulationEngine:
     self.n_steps = int(np.ceil(duration / dt))
     self.current_step = 0
 
-    # Inicializa histórico de saídas e tempo
     self.time_history = np.linspace(
         0, duration, self.n_steps, dtype=self.dtype)
     self.output_history = {}
     for name in self.systems:
-      # Lista temporária para armazenar qualquer tipo de saída
       self.output_history[name] = [None] * self.n_steps
 
   def advance_clock(self) -> bool:

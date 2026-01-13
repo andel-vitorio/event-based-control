@@ -1,23 +1,15 @@
-.PHONY: help save sync tag
+.PHONY: install uninstall dev clean
 
-# Configurações padrão
-MSG ?= "Atualização automática"
-BRANCH ?= main
+PACKAGE_NAME=event_based_control
 
-help:
-	@echo "Comandos disponíveis:"
-	@echo "  make save MSG='Sua mensagem'   - Adiciona e commita alterações localmente"
-	@echo "  make sync MSG='Sua mensagem'   - Commita e envia para o GitHub (push)"
-	@echo "  make tag v=1.0.0               - Cria uma tag de versão e envia para o GitHub"
+install:
+	pip install .
 
-save:
-	git add .
-	git commit -m "$(MSG)" || echo "Nenhuma alteração para salvar."
+dev:
+	pip install -e .
 
-sync: save
-	git push origin $(BRANCH)
+uninstall:
+	pip uninstall -y $(PACKAGE_NAME)
 
-tag:
-	@if [ -z "$(v)" ]; then echo "Erro: especifique a versão. Ex: make tag v=1.0.0"; exit 1; fi
-	git tag -a v$(v) -m "Versão $(v)"
-	git push origin v$(v)
+clean:
+	python -c "import shutil, os, glob; [shutil.rmtree(p) for p in glob.glob('*.egg-info') + ['build', 'dist'] if os.path.exists(p)]"

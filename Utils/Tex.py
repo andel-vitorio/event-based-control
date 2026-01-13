@@ -108,3 +108,7 @@ def display_matrix(matrix: Union[List[List[Union[str, float, int]]], np.ndarray]
   if name:
     latex_matrix = f"{name} = " + latex_matrix
   display(Math(latex_matrix))
+
+
+def display_latex(latex_expr: str):
+  display(Latex(latex_expr))

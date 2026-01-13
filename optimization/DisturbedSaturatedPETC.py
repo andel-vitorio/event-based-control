@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 from typing import Optional, Dict, Any
 import itertools
 import cvxpy as cp
