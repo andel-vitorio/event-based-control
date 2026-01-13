@@ -7,7 +7,7 @@ import traceback
 import functools
 
 
-def run_simulation(x0, config, results):
+def closed_loop(x0, config, results):
   """
   Executa uma simulação completa para o estado inicial 'x0'.
   """
@@ -79,6 +79,63 @@ def run_simulation(x0, config, results):
     time_history = sim.time_history
 
     return (plant_output, time_history, signal_control, eta, event_time)
+
+  except Exception as e:
+    tb_str = traceback.format_exc()
+    return (f"Erro INESPERADO: {e}\n{tb_str}", None, None, None, None)
+
+
+def open_loop(x0, config, u_constant=0.0):
+  """
+  Executa uma simulação em malha aberta (Open Loop) para o estado inicial 'x0'.
+
+  Args:
+      x0: Estado inicial.
+      config: Dicionário de configuração contendo os dados da planta.
+      u_constant: Valor constante de entrada (padrão 0.0 para resposta livre).
+  """
+
+  try:
+    # 1. Configuração da Planta e Motor de Simulação
+    plant = ds.StateSpace(data=config["plant"], name='plant')
+    sim = ds.SimulationEngine()
+    sim.add_system(plant)
+
+    # 2. Configuração do Estado Inicial
+    x0 = np.array(x0, dtype=np.float32).reshape(-1, 1)
+    sim.get_system('plant').set_initial_state(x0)
+
+    # 3. Configuração do Relógio (Mesma duração da malha fechada)
+    sim.setup_clock(duration=20.0, dt=1e-4)
+    sim.reset_clock()
+
+    signal_control = []
+
+    # 4. Loop de Simulação
+    while sim.advance_clock():
+      # Em malha aberta, a entrada é fixa ou pré-determinada,
+      # não dependendo do estado atual (sem feedback).
+      u_applied = u_constant
+
+      # Armazena para histórico
+      signal_control.append([u_applied])
+
+      default_inputs = {'plant': {'u1': u_applied}}
+
+      with sim.step(default_inputs=default_inputs) as step:
+        pass  # Nenhuma lógica de gatilho ou cálculo de controle aqui
+
+    # 5. Processamento dos Resultados
+    sim.finalize_history()
+    plant_output = sim.output_history['plant']
+    time_history = sim.time_history
+
+    # Formatação do sinal de controle para manter consistência com numpy
+    signal_control = np.array(signal_control).T
+
+    # Retorna a tupla no mesmo formato da run_simulation original.
+    # Eta e event_time são retornados como None pois não existem em malha aberta.
+    return (plant_output, time_history, signal_control, None, None)
 
   except Exception as e:
     tb_str = traceback.format_exc()

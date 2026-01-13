@@ -1,4 +1,5 @@
 import matplotlib as mpl
+from IPython import get_ipython
 
 try:
   from IPython.display import HTML, display
@@ -25,20 +26,24 @@ def setup():
 
     @register_cell_magic
     def skip(line, cell):
+      ip = get_ipython()
+      user_ns = ip.user_ns
+
       if not line.strip():
         print("Cell skipped (unconditional).")
         return
 
       try:
-        condition = eval(line, globals())
+        condition = eval(line, user_ns)
       except Exception as e:
         print(f"Error evaluating condition '{line}': {e}")
         return
 
       if condition:
         print(f"Cell skipped (condition: {line})")
-      else:
-        exec(cell, globals())
+        return
+
+      exec(cell, user_ns)
 
   mpl.rcParams["figure.dpi"] = 100
 
