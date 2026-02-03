@@ -1,0 +1,76 @@
+{
+  "name": "exp1",
+  "duration": 5,
+  "dt": 1e-5,
+  "plant": {
+    "system_matrices": {
+      "A": [
+        ["-0.3672", "0.7038"],
+        ["-1.8462", "2.0094"]
+      ],
+      "B": [["-1."], ["1."]],
+      "C": [
+        ["1.", "0."],
+        ["0.", "1."]
+      ],
+      "E": null,
+      "D": null,
+      "Cz": null,
+      "Dz": null
+    },
+    "bounds": {
+      "u": null,
+      "ρ": null,
+      "w_l2_norm": null
+    },
+    "parameters": null,
+    "disturbances": null,
+    "labels": {
+      "parameters": null,
+      "states": {
+        "x1": {
+          "name": "Posição Angular",
+          "symbol": "$x_1$",
+          "unit": ""
+        },
+        "x2": {
+          "name": "Velocidade Angular",
+          "symbol": "$x_2$",
+          "unit": ""
+        }
+      },
+      "outputs": {
+        "y1": {
+          "name": "Posição Angular",
+          "symbol": "$x_1$",
+          "unit": ""
+        },
+        "y2": {
+          "name": "Velocidade Angular",
+          "symbol": "$x_2$",
+          "unit": ""
+        }
+      },
+      "performance_outputs": null,
+      "inputs": {
+        "u1": {
+          "name": "Entrada $u(t)$",
+          "symbol": "$u$",
+          "unit": ""
+        }
+      },
+      "disturbances": null
+    }
+  },
+  "design_params": {
+    "dspetc": {
+      "save": true,
+      "h": 1e-3,
+      "υ": 1e-1,
+      "δ": 10.0,
+      "ε_γ": 1e-1,
+      "λ": 1e-1,
+      "θ": 1.01
+    }
+  }
+}

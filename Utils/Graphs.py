@@ -36,11 +36,15 @@ def use_latex():
 def plot(ax, x_data, y_data,
          xlabel=None, ylabel=None, title=None, label='',
          cfg={}, *,
+         color=None,
          x_unit='', y_unit='',
          x_use_prefixes=False, y_use_prefixes=False,
          x_pad=(0.0, 0.0), y_pad=(0.0, 0.0)):
 
   import numpy as np
+
+  # x em 1D
+  x_arr = np.asarray(x_data, dtype=float).ravel()
 
   # normalizar curvas
   if isinstance(y_data, (list, tuple)):
@@ -49,10 +53,16 @@ def plot(ax, x_data, y_data,
     else:
       y_arrays = [np.asarray(y, dtype=float).ravel() for y in y_data]
   else:
-    y_arrays = [np.asarray(y_data, dtype=float).ravel()]
-
-  # x em 1D
-  x_arr = np.asarray(x_data, dtype=float).ravel()
+    y_temp = np.asarray(y_data, dtype=float)
+    if y_temp.ndim == 2:
+      if y_temp.shape[1] == x_arr.size:
+        y_arrays = list(y_temp)
+      elif y_temp.shape[0] == x_arr.size:
+        y_arrays = [y_temp[:, i] for i in range(y_temp.shape[1])]
+      else:
+        y_arrays = [y_temp.ravel()]
+    else:
+      y_arrays = [y_temp.ravel()]
 
   # remover curvas inconsistentes
   y_arrays = [y for y in y_arrays if y.size == x_arr.size]
@@ -80,17 +90,22 @@ def plot(ax, x_data, y_data,
   legend_cfg = cfg.get('legend', {})
 
   def normalize(param, n):
+    if param is None:
+      return [None] * n
     if isinstance(param, (list, tuple, np.ndarray)):
-      if len(param) in (3, 4) and all(isinstance(x, (float, int)) for x in param):
+      if isinstance(param, tuple) and len(param) in (3, 4) and all(isinstance(x, (float, int)) for x in param):
         return [param] * n
-      if len(param) == n:
-        return list(param)
-      return [param[0]] * n
+      if len(param) == 0:
+        return [None] * n
+      return [param[i % len(param)] for i in range(n)]
     return [param] * n
 
   n_curves = len(y_arrays)
-  labels = label if isinstance(label, (list, tuple)) else [label] * n_curves
-  colors = normalize(style.get('color', 'black'), n_curves)
+  labels = normalize(label, n_curves)
+
+  target_color = color if color is not None else style.get('color', 'black')
+  colors = normalize(target_color, n_curves)
+
   linestyles = normalize(style.get('linestyle', '-'), n_curves)
   linewidths = normalize(style.get('linewidth', 1.67), n_curves)
 
@@ -138,6 +153,13 @@ def plot(ax, x_data, y_data,
         ylabel + y_label_suffix,
         fontsize=axis_cfg.get('y_label_fontsize', 16),
         labelpad=axis_cfg.get('y_label_pad', 8)
+    )
+
+  if title is not None:
+    ax.set_title(
+        title,
+        fontsize=axis_cfg.get('title_fontsize', 16),
+        pad=axis_cfg.get('title_pad', 8)
     )
 
   # ---------- ESTILO ----------

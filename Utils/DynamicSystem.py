@@ -1,3 +1,4 @@
+import traceback
 import itertools
 from typing import List, Dict, Optional
 from typing import Dict, Any, Callable, Optional
@@ -106,34 +107,40 @@ class StateSpace(System):
 
     self.system_data = data
     self.dtype = dtype
-    self.matrices_exprs = self.system_data.get("system_matrices", {})
+    self.matrices_exprs = self.system_data.get("system_matrices") or {}
 
     labels = self.get_labels()
-    self.nu = len(labels.get("inputs", []))
-    self.n_rho = len(labels.get("parameters", []))
-    self.nw = len(labels.get("disturbances", []))
-    self.nx = len(labels.get("states", []))
-    self.ny = len(labels.get("outputs", []))
-    self.nz = len(labels.get("performance_outputs", []))
 
-    self.bounds = self.system_data.get("bounds", {})
+    def _safe_len(obj):
+      return len(obj) if obj is not None else 0
+
+    self.nu = _safe_len(labels.get("inputs"))
+    self.n_rho = _safe_len(labels.get("parameters"))
+    self.nw = _safe_len(labels.get("disturbances"))
+    self.nx = _safe_len(labels.get("states"))
+    self.ny = _safe_len(labels.get("outputs"))
+    self.nz = _safe_len(labels.get("performance_outputs"))
+
+    self.bounds = self.system_data.get("bounds") or {}
 
     # Compila expressões
-    self.compiled_matrices = {
-        key: [[compile(expr, "<string>", "eval") for expr in row]
-              for row in matrix]
-        for key, matrix in self.matrices_exprs.items()
-    }
+    self.compiled_matrices = {}
+    for key, matrix in self.matrices_exprs.items():
+      if matrix is not None:
+        self.compiled_matrices[key] = [[compile(expr, "<string>", "eval") for expr in row]
+                                       for row in matrix]
 
+    params_data = self.system_data.get("parameters") or {}
     self.compiled_params = {
         k: compile(v, "<string>", "eval")
-        for k, v in self.system_data.get("parameters", {}).items()
+        for k, v in params_data.items()
         if isinstance(v, str)
     }
 
+    disturbs_data = self.system_data.get("disturbances") or {}
     self.compiled_disturbs = {
         k: compile(v, "<string>", "eval")
-        for k, v in self.system_data.get("disturbances", {}).items()
+        for k, v in disturbs_data.items()
         if isinstance(v, str)
     }
 
@@ -153,7 +160,7 @@ class StateSpace(System):
   # Labels
   # ===========================================================
   def get_labels(self) -> dict:
-    return self.system_data.get("labels", {})
+    return self.system_data.get("labels") or {}
 
   # ===========================================================
   # Bounds
@@ -162,15 +169,23 @@ class StateSpace(System):
     return self.bounds
 
   def get_input_bounds(self) -> np.ndarray:
-    u_b = self.bounds.get("u", [])
+    u_b = self.bounds.get("u")
+    if u_b is None:
+      if self.nu > 0:
+        return np.full((self.nu, 1), np.inf, dtype=self.dtype)
+      return np.zeros((0, 1), dtype=self.dtype)
     return np.array(u_b, dtype=self.dtype).reshape(-1, 1)
 
   def get_parameter_bounds(self) -> np.ndarray:
-    p_b = self.bounds.get("\u03c1", [])
+    p_b = self.bounds.get("ρ")
+    if p_b is None:
+      return np.zeros((self.n_rho, 2), dtype=self.dtype)
     return np.array(p_b, dtype=self.dtype)
 
   def get_disturbance_l2_norm_bound(self) -> np.ndarray:
-    w_l2 = self.bounds.get("w_l2_norm", [])
+    w_l2 = self.bounds.get("w_l2_norm")
+    if w_l2 is None:
+      return np.array([], dtype=self.dtype)
     return np.array(w_l2, dtype=self.dtype)
 
   # ===========================================================
@@ -196,16 +211,16 @@ class StateSpace(System):
     u_vec = np.hstack(list(u_dict.values())).astype(
         self.dtype) if u_dict else np.zeros((self.nu,), dtype=self.dtype)
 
-    state_labels = list(self.get_labels().get("states", {}).keys())
+    state_labels = list((self.get_labels().get("states") or {}).keys())
     state_dict = dict(zip(state_labels, x.flatten()))
 
     rho_vec = self.evaluate_parameters(t, state_dict)
     w_vec = self.evaluate_disturbances(t, state_dict)
 
     param_dict = dict(
-        zip(self.get_labels().get("parameters", {}).keys(), rho_vec))
+        zip((self.get_labels().get("parameters") or {}).keys(), rho_vec))
     disturb_dict = dict(
-        zip(self.get_labels().get("disturbances", {}).keys(), w_vec))
+        zip((self.get_labels().get("disturbances") or {}).keys(), w_vec))
 
     matrices = self.evaluate_matrices(state_dict, param_dict, disturb_dict)
 
@@ -299,11 +314,12 @@ class StateSpace(System):
     Retorna as equações de estado simbólicas formatadas em LaTeX.
     """
     # 1. Obter listas de labels
-    state_labels = list(self.get_labels().get("states", {}).keys())
-    input_labels = list(self.get_labels().get("inputs", {}).keys())
-    disturb_labels = list(self.get_labels().get("disturbances", {}).keys())
-    output_labels = list(self.get_labels().get("outputs", {}).keys())
-    perf_labels = list(self.get_labels().get("performance_outputs", {}).keys())
+    labels = self.get_labels()
+    state_labels = list((labels.get("states") or {}).keys())
+    input_labels = list((labels.get("inputs") or {}).keys())
+    disturb_labels = list((labels.get("disturbances") or {}).keys())
+    output_labels = list((labels.get("outputs") or {}).keys())
+    perf_labels = list((labels.get("performance_outputs") or {}).keys())
 
     # 2. Construir todos os vetores LaTeX
     x_dot_vec = self._build_latex_vector(state_labels, is_derivative=True)
@@ -336,14 +352,14 @@ class StateSpace(System):
     # Equação de saída (medição)
     if self.ny > 0:
       y_eq = [rf"{C_mat} {x_vec}"]
-      if self.nu > 0:
+      if self.nu > 0 and self.matrices_exprs.get("D"):
         y_eq.append(rf"+ {D_mat} {u_vec}")
       eqs.append(rf"{y_vec} &= {' '.join(y_eq)}")
 
     # Equação de saída (desempenho)
     if self.nz > 0:
       z_eq = [rf"{Cz_mat} {x_vec}"]
-      if self.nu > 0:
+      if self.nu > 0 and self.matrices_exprs.get("Dz"):
         z_eq.append(rf"+ {Dz_mat} {u_vec}")
       eqs.append(rf"{z_vec} &= {' '.join(z_eq)}")
 
@@ -360,13 +376,13 @@ class StateSpace(System):
 
   def evaluate_parameters(self, t: float, state: dict = None) -> np.ndarray:
     context = {**(state or {}), "t": t}
-    param_labels = list(self.get_labels().get("parameters", {}).keys())
+    param_labels = list((self.get_labels().get("parameters") or {}).keys())
     return np.array([self.evaluate_expr(self.compiled_params[k], context) for k in param_labels],
                     dtype=self.dtype)
 
   def evaluate_disturbances(self, t: float, state: dict = None) -> np.ndarray:
     context = {**(state or {}), "t": t}
-    disturb_labels = list(self.get_labels().get("disturbances", {}).keys())
+    disturb_labels = list((self.get_labels().get("disturbances") or {}).keys())
     return np.array([self.evaluate_expr(self.compiled_disturbs[k], context) for k in disturb_labels],
                     dtype=self.dtype)
 
@@ -395,13 +411,58 @@ class StateSpace(System):
     Retorna dicionário com todas as matrizes (A, B, C, D, E, Cz, Dz...)
     """
     labels = self.get_labels()
-    param_names = labels.get("parameters", [])
+    param_names = list((labels.get("parameters") or {}).keys())
     param_dict = dict(zip(param_names, rho_i))
 
     matrices = self.evaluate_matrices(
         state_dict=None, param_vals=param_dict, disturb_vals={})
 
     return {k: np.array(v, dtype=self.dtype) for k, v in matrices.items()}
+
+  def export_matrices_jit(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Exporta as matrizes A, B, C, D como arrays contíguos em memória (C-order),
+    formatados especificamente para consumo por kernels Numba.
+
+    Returns:
+        A, B, C, D (np.float64, C-contiguous)
+    """
+    # Avalia no contexto vazio (t=0, x=0) para resolver strings numéricas
+    mats = self.evaluate_matrices()
+
+    # ascontiguousarray é CRUCIAL para vetorização no Numba
+    A = np.ascontiguousarray(
+        mats.get('A', np.zeros((self.nx, self.nx))), dtype=np.float64)
+    B = np.ascontiguousarray(
+        mats.get('B', np.zeros((self.nx, self.nu))), dtype=np.float64)
+    C = np.ascontiguousarray(
+        mats.get('C', np.zeros((self.ny, self.nx))), dtype=np.float64)
+
+    if mats.get('D') is not None:
+      D = np.ascontiguousarray(mats['D'], dtype=np.float64)
+    else:
+      D = np.zeros((self.ny, self.nu), dtype=np.float64)
+
+    return A, B, C, D
+
+  def get_input_bounds_jit(self) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Retorna os limites de saturação (min, max) formatados para Numba.
+    Se não houver bounds no JSON, retorna +/- infinito.
+    """
+    bounds_data = self.system_data.get("bounds", {}).get("u")
+
+    if bounds_data is None:
+      u_max = np.full(self.nu, np.inf, dtype=np.float64)
+      u_min = np.full(self.nu, -np.inf, dtype=np.float64)
+    else:
+      # Assume que o JSON fornece o valor absoluto max (saturação simétrica)
+      # Se o JSON tiver [min, max], ajustar lógica aqui.
+      vals = np.array(bounds_data, dtype=np.float64).flatten()
+      u_max = vals
+      u_min = -vals
+
+    return np.ascontiguousarray(u_min), np.ascontiguousarray(u_max)
 
 
 class _SimulationStep:
@@ -426,7 +487,7 @@ class _SimulationStep:
     return False
 
 
-class SimulationEngine:
+class SimulationEngineOld:
   def __init__(self, dtype=np.float32):
     self.systems = {}
     self.dtype = dtype
@@ -501,6 +562,68 @@ class SimulationEngine:
     self.current_step = 0
     for sys in self.systems.values():
       sys.reset()
+
+
+class SimulationEngine:
+  """
+  Infraestrutura de execução agnóstica.
+  Atua como um Container de Sistemas e um 'Runner' para Kernels JIT.
+  """
+
+  def __init__(self, dtype=np.float64):
+    self.systems: Dict[str, StateSpace] = {}
+    self.dtype = dtype
+
+    # Parâmetros de Tempo
+    self.t = 0.0
+    self.dt = 0.0
+    self.duration = 0.0
+    self.n_steps = 0
+
+    # Históricos
+    self.time_history: Optional[np.ndarray] = None
+    self.output_history: Dict[str, np.ndarray] = {}
+
+  def add_system(self, system: StateSpace):
+    """Registra um sistema no motor."""
+    if not getattr(system, "name", None):
+      raise ValueError("Sistema sem nome inválido.")
+    self.systems[system.name] = system
+
+  def setup_clock(self, duration: float, dt: float = 1e-4):
+    """
+    Configura a base de tempo da simulação.
+    """
+    self.duration = float(duration)
+    self.dt = float(dt)
+    # Cálculo seguro para n_steps
+    self.n_steps = int(np.ceil(self.duration / self.dt)) + 1
+
+    # Pré-aloca vetor de tempo para referência futura
+    self.time_history = np.linspace(
+        0.0, self.duration, self.n_steps, dtype=self.dtype)
+
+  def run_kernel(self, kernel_func, *args) -> Any:
+    """c
+    Método Genérico de Despacho JIT.
+    Executa uma função kernel (definida em simulator.py) passando os argumentos.
+
+    Args:
+        kernel_func: Função decorada com @njit contendo a lógica do loop.
+        *args: Argumentos posicionais esperados pelo kernel (arrays, floats).
+
+    Returns:
+        O retorno bruto do kernel (geralmente tuplas de arrays).
+    """
+    # Aqui é possível adicionar instrumentação (tempo de execução, logs)
+    return kernel_func(*args)
+
+  def get_system(self, name: str) -> StateSpace:
+    return self.systems[name]
+
+  def finalize(self):
+    """Método opcional para limpeza ou pós-processamento de dados."""
+    pass
 
 
 class Sampler:

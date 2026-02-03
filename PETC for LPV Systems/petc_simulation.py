@@ -20,8 +20,8 @@ def closed_loop_detm(x0, config, results):
     if results is None:
       return (f"Erro: Dicionário 'results' está Nulo.", None, None, None, None)
 
-    Xi, Psi = results['etm']['\u039e'], results['etm']['\u03a8']
-    theta, lambda_ = results['etm']['\u03b8'], results['etm']['\u03bb']
+    Xi, Psi = results['etm']['Ξ'], results['etm']['Ψ']
+    theta, lambda_ = results['etm']['θ'], results['etm']['λ']
     K = results['controller']['K']
     P = results['lyapunov'][0]
 
@@ -29,8 +29,8 @@ def closed_loop_detm(x0, config, results):
     u_bar = plant.get_input_bounds()
     sampler = ds.Sampler(Ts=design_params['h'], time_source=lambda: sim.t)
 
-    detm_kwargs = {'\u039e': Xi, '\u03a8': Psi,
-                   '\u03bb': lambda_, '\u03b8': theta}
+    detm_kwargs = {'Ξ': Xi, 'Ψ': Psi,
+                   'λ': lambda_, 'θ': theta}
     detm = DSPETC.DETM(**detm_kwargs)
     sim.add_system(detm)
     rho_bounds = plant.get_parameter_bounds()
@@ -98,14 +98,14 @@ def closed_loop_setm(x0, config, results):
     if results is None:
       return (f"Erro: Dicionário 'results' está Nulo.", None, None, None, None)
 
-    Xi, Psi = results['etm']['\u039e'], results['etm']['\u03a8']
+    Xi, Psi = results['etm']['Ξ'], results['etm']['Ψ']
     K = results['controller']['K']
 
     design_params = config["design_params"]["dspetc"]
     u_bar = plant.get_input_bounds()
     sampler = ds.Sampler(Ts=design_params['h'], time_source=lambda: sim.t)
 
-    setm_kwargs = {'\u039e': Xi, '\u03a8': Psi}
+    setm_kwargs = {'Ξ': Xi, 'Ψ': Psi}
     setm = DSPETC.SETM(**setm_kwargs)
     sim.add_system(setm)
     rho_bounds = plant.get_parameter_bounds()

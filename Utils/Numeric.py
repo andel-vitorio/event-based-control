@@ -1,3 +1,4 @@
+from numba import njit
 from typing import Dict, Any, Union
 from typing import Iterable, Callable, Optional, Union, Dict
 import itertools
@@ -370,6 +371,67 @@ def rk5_step(
          2565 - 1859*k4/4104 + 11*k5/40), u, params)
 
   return x + T_s * (16*k1/135 + 6656*k3/12825 + 28561*k4/56430 - 9*k5/50 + 2*k6/55)
+
+
+@njit(fastmath=True, cache=True)
+def rk5_numba(A, B, x, u, dt):
+  """
+  Passo de integração RK5 (Dormand-Prince) compilado para sistemas LTI.
+  x_dot = A*x + B*u
+
+  Coeficientes extraídos do seu Numeric.py original.
+  """
+  k1 = A @ x + B @ u
+
+  x2 = x + dt * (0.25 * k1)
+  k2 = A @ x2 + B @ u
+
+  x3 = x + dt * (3.0/32.0 * k1 + 9.0/32.0 * k2)
+  k3 = A @ x3 + B @ u
+
+  x4 = x + dt * ((1932.0/2197.0)*k1 - (7200.0/2197.0)*k2 + (7296.0/2197.0)*k3)
+  k4 = A @ x4 + B @ u
+
+  x5 = x + dt * ((439.0/216.0)*k1 - 8.0*k2 +
+                 (3680.0/513.0)*k3 - (845.0/4104.0)*k4)
+  k5 = A @ x5 + B @ u
+
+  x6 = x + dt * (-(8.0/27.0)*k1 + 2.0*k2 - (3544.0/2565.0)
+                 * k3 + (1859.0/4104.0)*k4 - (11.0/40.0)*k5)
+  k6 = A @ x6 + B @ u
+
+  x_next = x + dt * (
+      (16.0/135.0)*k1 +
+      (6656.0/12825.0)*k3 +
+      (28561.0/56430.0)*k4 -
+      (9.0/50.0)*k5 +
+      (2.0/55.0)*k6
+  )
+
+  return x_next
+
+
+@njit(fastmath=True, cache=True)
+def compute_deltas(sequence, initial_ref=0.0):
+  """
+  Calcula os intervalos (deltas) entre elementos consecutivos.
+  Corrigido para compatibilidade total com Numba.
+  """
+  n = len(sequence)
+
+  if n == 0:
+    return np.zeros(0, dtype=np.float64)
+
+  deltas = np.empty(n, dtype=np.float64)
+
+  # O primeiro intervalo é relativo à referência inicial
+  deltas[0] = sequence[0] - initial_ref
+
+  # Diferença entre elementos consecutivos
+  for i in range(1, n):
+    deltas[i] = sequence[i] - sequence[i-1]
+
+  return deltas
 
 
 def get_e(lines_number: List[int]) -> Dict[int, np.ndarray]:
