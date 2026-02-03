@@ -30,41 +30,38 @@ class NpEncoder(json.JSONEncoder):
     return super(NpEncoder, self).default(obj)
 
 
-def create_simulation_id(plant_object, design_params_dict) -> str:
+def create_simulation_id(plant_object, design_params_dict, scheme_name: str = "DETM") -> str:
   """
-  Gera um ID de hash MD5 único baseado nos dados de definição da planta
-  e nos parâmetros de projeto.
+  Gera um ID de hash MD5 único baseado nos dados de definição da planta,
+  nos parâmetros de projeto e no esquema de controle.
 
   Args:
       plant_object: A instância da sua classe StateSpace (que contém .system_data).
       design_params_dict: O dicionário com os parâmetros de projeto (h, v, etc.).
+      scheme_name: Nome do esquema (ex: 'DETM', 'SETM', 'SETM_STAR', 'AETM').
 
   Returns:
       Uma string de hash MD5 (ex: "sim_a1b2c3d4...")
   """
 
-  # 1. Obter os dados de definição da planta (o dicionário original)
   try:
     plant_definition = plant_object.system_data
   except AttributeError:
     raise ValueError(
         "O objeto 'plant' não possui o atributo 'system_data'.")
 
-  # 2. Combinar todos os dados que definem a simulação
   combined_data = {
       "plant_definition": plant_definition,
-      "design_parameters": design_params_dict
+      "design_parameters": design_params_dict,
+      "scheme_name": scheme_name
   }
 
-  # 3. Serializar os dados para uma string canônica (ordenada)
-  #    Usamos o NpEncoder para segurança, caso haja tipos numpy.
   data_string = json.dumps(
       combined_data,
       sort_keys=True,
       cls=NpEncoder
   )
 
-  # 4. Calcular o hash MD5 da string (codificada como bytes)
   hash_object = hashlib.md5(data_string.encode('utf-8'))
   hash_id = hash_object.hexdigest()
 
