@@ -1,80 +1,134 @@
+<div align="center">
+
 # Controle Baseado em Eventos
 
-> **Autor:** Andevaldo da Encarnação Vitório  
-> **Orientador:** Prof. Dr. Iury Valente de Bessa  
-> **Instituição:** Universidade Federal do Amazonas (UFAM)  
-> **Curso:** Mestrado/Doutorado em Engenharia Elétrica
+**Andevaldo da Encarnação Vitório** _Mestre e Doutorando em Engenharia Elétrica_
+
+**Orientador:** Prof. Dr. Iury Valente de Bessa  
+_Universidade Federal do Amazonas (UFAM)_
+
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=flat-square&logo=python)](https://www.python.org/)
+[![License](https://img.shields.io/badge/License-Academic-green?style=flat-square)](https://tede.ufam.edu.br/handle/tede/11191)
+[![Status](https://img.shields.io/badge/Status-Active%20Dev-orange?style=flat-square)]()
+
+</div>
 
 ---
 
-Este projeto foi realizado durante o meu mestrado (2024-2025) e está sendo continuado no doutorado. Atualmente, estou trabalhando na refatoração de todos os códigos utilizados para obter os resultados da minha dissertação de mestrado, disponível em: [TEDE UFAM](https://tede.ufam.edu.br/handle/tede/11191).
+> [!NOTE]
+> **Status de Desenvolvimento** > O foco atual é a refatoração completa dos códigos da dissertação ([TEDE UFAM](https://tede.ufam.edu.br/handle/tede/11191)) e a implementação de novos cenários complexos para a tese, incluindo sistemas LPV, tolerância a falhas e segurança cibernética.
 
-Este repositório contém uma estrutura em Python para o projeto (síntese) e simulação de estratégias de controle baseadas em eventos. O foco atual inclui o Controle Acionado po Eventos (ETC) aplicado a sistemas Lineares com Parâmetros Variantes (LPV), mas a arquitetura permite a extensão para outros tipos de sistemas e mecanismos de acionamento, considerando perturbações externas e saturação nos atuadores.
+## 📋 Sobre o Projeto
 
-## Funcionalidades Principais
+Este repositório contém um framework robusto em Python para **síntese, simulação e análise de estratégias de Controle Acionado por Eventos (ETC)**. O projeto consolida a pesquisa iniciada no mestrado (2024-2025) e expandida no doutorado, focando na reprodutibilidade científica e na extensão para sistemas complexos.
 
-- **Síntese LMI**: Algoritmos baseados em otimização convexa (Desigualdades Matriciais Lineares) para projetar co-projetar o controlador e o mecanismo de disparo.
-  - **DETM**: Mecanismo de Disparo de Eventos Dinâmico (_Dynamic Event-Triggered Mechanism_).
-  - **SETM**: Mecanismo de Disparo de Eventos Estático (_Static Event-Triggered Mechanism_).
-- **Simulação de Sistemas Dinâmicos**: Um motor de simulação (`SimulationEngine`) capaz de lidar com sistemas lineares e LPVs.
-- **Sistemas LPV**: Suporte para definição de sistemas com parâmetros variantes no tempo, incluindo limites de variação e incertezas politópicas.
-- **Ferramentas de Análise**: Utilitários para plotagem de gráficos, formatação LaTeX e cálculos geométricos (elipsoides, poliedros).
+---
 
-## Estrutura do Projeto
+## 📚 Produção Científica
+
+### Dissertação de Mestrado (2025)
+
+**Título:** _Controle baseado em eventos de sistemas lineares a parâmetros variantes sob distúrbios de energia limitada e atuadores saturantes_  
+**Defesa:** 02 de Setembro de 2025  
+**Link:** [Acessar no TEDE UFAM](https://tede.ufam.edu.br/handle/tede/11191)
+
+> **Citação:** VITORIO, Andevaldo da Encarnação. **Controle baseado em eventos de sistemas lineares a parâmetros variantes sob distúrbios de energia limitada e atuadores saturantes**. 2025. 154 f. Dissertação (Mestrado em Engenharia Elétrica) – Universidade Federal do Amazonas, Manaus (AM), 2025.
+
+<details>
+<summary><strong>Ver Resumo / Abstract</strong> (Clique para expandir)</summary>
+
+<br>
+
+**Resumo:** Os Sistemas de Controle em Rede (NCS) têm papel essencial em aplicações industriais e tecnológicas... [Texto completo omitido para brevidade visual, mas incluído no contexto do documento original] ...A eficácia das abordagens é validada por meio de simulações numéricas.
+
+**Abstract:** Networked Control Systems (NCS) play a crucial role in industrial and technological applications... [Full text omitted for visual brevity] ...The effectiveness of the proposed approaches is validated through numerical simulations.
+
+</details>
+
+---
+
+## 🚀 Funcionalidades Principais
+
+### Estratégias de Controle Baseado em Eventos
+
+- **Síntese LMI Robusta:** Co-projeto de controladores e gatilhos via otimização convexa (CVXPY/MOSEK).
+- **Mecanismos Avançados:**
+  - **DETM:** Mecanismo de Acionamento Dinâmico (_Dynamic Event-Triggered Mechanism_).
+  - **SETM / SETM\*:** Mecanismo de Acionamento Estáticos (_Static Event-Triggered Mechanism_).
+  - **AETM:** Mecanismo de Acionamento Adaptativo (_Adaptive Event-Triggered Mechanism_).
+  - **DAETM** Mecanismo de Acionamento Dinâmico-Adaptativo (_Dynamic-adaptive Event-Triggered Mechanism_).
+
+### Cenários de Simulação
+
+- **Sistemas LPV:** Modelagem de parâmetros variantes no tempo e incertezas politópicas.
+- **Robustez e Segurança:**
+  - Sistemas sob saturação de atuadores e perturbações externas.
+  - **Tolerância a Falhas (FTC):** Compensação de falhas em tempo real.
+  - **Cibersegurança:** Análise sob Ataques de Decepção (_Deception Attacks_).
+- **Aplicações:** Controle de temperatura (HVAC) e Conversores DC-DC.
+
+---
+
+## 📂 Estrutura do Repositório
+
+O projeto opera como um pacote Python modular (`event_based_control`).
 
 ### `optimization/`
 
-Contém os módulos de otimização para o projeto dos controladores.
+Núcleo de síntese dos controladores.
 
-- `DisturbedSaturatedPETC.py`: Implementa as funções `detm_synthesis` e `setm_synthesis` usando CVXPY para resolver os problemas de otimização. Também define as classes `DETM` e `SETM` usadas na simulação.
-
-### `PETC for LPV Systems/`
-
-Scripts e notebooks focados na aplicação e simulação.
-
-- `petc_simulation.py`: Contém as funções de malha fechada (`closed_loop_detm`, `closed_loop_setm`) que integram a planta, o controlador e o mecanismo de eventos.
+- `DisturbedSaturatedPETC.py`: Implementação das classes `DETM` e `SETM` considerando perturbação e saturação, além das rotinas de otimização LMI.
 
 ### `PETC for LIT Systems/`
 
-Scripts e notebooks focados em sistemas Lineares Invariantes no Tempo (LIT).
+Notebooks para sistemas Lineares Invariantes no Tempo (LIT).
 
-### `PETC for DC Converters/`
+- `2 - Fault Tolerance.ipynb`: Estudos sobre tolerância a falhas.
+- `3 - HVAC Under Disturbances.ipynb`: Aplicação em sistemas térmicos prediais.
+- `4/5 - Systems under Saturation...`: Análise de ataques e saturação.
 
-Aplicações específicas para conversores DC-DC.
+### `PETC for LPV Systems/`
+
+Foco em sistemas Lineares com Parâmetros Variantes.
+
+- `petc_simulation.py`: Rotinas de malha fechada para LPV.
+- `Results/`: Logs de experimentos comparativos (Síncrono, SETM\*, DAETM).
 
 ### `Utils/`
 
-Bibliotecas auxiliares para o funcionamento do framework.
+Bibliotecas auxiliares (_Backend_).
 
-- `DynamicSystem.py`: Classes principais como `StateSpace` (para modelagem da planta), `SimulationEngine` (motor de simulação), `Sampler` e `GainScheduledController`.
-- `Numeric.py`: Funções matemáticas, integração numérica (Runge-Kutta de 5ª ordem), operações com conjuntos e geometria.
-- `Graphs.py`: Funções para geração de gráficos (evolução de estados, intervalos entre eventos, planos de fase).
-- `Tex.py`: Utilitários para exportação e formatação de resultados em LaTeX.
+- `DynamicSystem.py`: Engines de simulação (`SimulationEngine`), amostradores e plantas.
+- `Numeric.py`: Métodos numéricos (Runge-Kutta 5ª ordem) e geometria de conjuntos.
+- `Graphs.py` & `Tex.py`: Ferramentas de visualização e exportação para LaTeX.
 
-## Instalação e Requisitos
+---
 
-Este projeto foi estruturado como um pacote Python para facilitar a importação dos módulos compartilhados nos notebooks de estudo. Para rodar os exemplos sem problemas, é necessário realizar a instalação das dependências.
+## 🛠 Instalação e Configuração
 
-### Dependências Principais
+O projeto utiliza um `Makefile` para orquestrar o ambiente.
 
-- **CVXPY**: Utilizado como parser para a modelagem dos problemas de otimização convexa (LMIs).
-- **MOSEK**: Solver de otimização de alta performance, altamente recomendado para os problemas tratados neste projeto.
-  - _Nota_: O MOSEK requer uma licença (acadêmica ou comercial) para funcionar. Certifique-se de que a licença esteja configurada corretamente em seu ambiente.
-- **Bibliotecas Científicas**: `numpy`, `scipy` para cálculos numéricos e `matplotlib` para visualização.
+### Pré-requisitos
 
-### Configuração do Ambiente
+- **Solvers:** Recomenda-se o **MOSEK** (licença acadêmica) para estabilidade numérica nas LMIs.
+- **Python:** 3.10 ou superior.
 
-O projeto inclui um `Makefile` para automatizar a instalação. No terminal, navegue até a raiz do repositório e execute um dos comandos abaixo:
+### Comandos de Instalação
 
-1.  **Instalação em Modo de Desenvolvimento (Recomendado)**:
-    Utilize este comando se você pretende modificar os códigos fonte em `Utils` ou `optimization` e quer que as alterações sejam refletidas imediatamente nos notebooks.
+No terminal, na raiz do projeto:
 
-    ```bash
-    make dev
-    ```
+**1. Modo Desenvolvimento (Recomendado)**
+Instala as dependências e linka os módulos locais (`Utils`, `optimization`) para edição em tempo real.
 
-2.  **Instalação Padrão**:
-    Para apenas utilizar os módulos como estão.
-    ```bash
-    make install
-    ```
+```bash
+make dev
+
+```
+
+**2. Instalação Padrão**
+Apenas para execução dos notebooks existentes.
+
+```bash
+make install
+
+```
