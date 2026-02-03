@@ -1,7 +1,7 @@
-.vscode/*
-*/**/Results
-*/**/Temp
-*/**/temp
+.vscode/
+Results/
+Temp/
+temp/
 event_based_control.egg-info/
 build/
 dist/
