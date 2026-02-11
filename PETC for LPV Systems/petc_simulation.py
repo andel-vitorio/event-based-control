@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 from optimization import DisturbedSaturatedPETC as DSPETC
 from Utils import Signal as sgn
 from Utils import Numeric as nm
@@ -14,7 +16,7 @@ def closed_loop_detm(x0, config, results):
 
   try:
     plant = ds.StateSpace(data=config["plant"], name='plant')
-    sim = ds.SimulationEngine()
+    sim = ds.SimulationEngineOld()
     sim.add_system(plant)
 
     if results is None:
@@ -92,7 +94,7 @@ def closed_loop_setm(x0, config, results):
 
   try:
     plant = ds.StateSpace(data=config["plant"], name='plant')
-    sim = ds.SimulationEngine()
+    sim = ds.SimulationEngineOld()
     sim.add_system(plant)
 
     if results is None:
@@ -171,7 +173,7 @@ def open_loop(x0, config, u_constant=0.0):
   try:
     # 1. Configuração da Planta e Motor de Simulação
     plant = ds.StateSpace(data=config["plant"], name='plant')
-    sim = ds.SimulationEngine()
+    sim = ds.SimulationEngineOld()
     sim.add_system(plant)
 
     # 2. Configuração do Estado Inicial
