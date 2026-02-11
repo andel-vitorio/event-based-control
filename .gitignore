@@ -5,6 +5,9 @@ temp/
 event_based_control.egg-info/
 build/
 dist/
-__pycache__/
-*.py[cod]
 .ipynb_checkpoints
+
+# Byte-compiled files (Recursive)
+**/__pycache__/
+**/*.py[cod]
+*$py.class
