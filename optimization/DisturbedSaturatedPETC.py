@@ -800,6 +800,242 @@ def setmst_synthesis(
   return design_results
 
 
+def aetm_synthesis(
+    plant_data: Dict[str, Any],
+    design_params: Dict[str, float],
+    eps: float = 1e-6,
+    dtype=np.float32
+):
+  """
+  Solve the LMI-based networked control problem for AETM (Adaptive ETM).
+
+  Parameters
+  ----------
+  plant_data : dict
+      Plant information (nx, nu, nρ, nw, ρ_bounds, u_bar, matrices_func, nz).
+  design_params : dict
+      Design parameters: h, υ, δ, ε_γ, σ_til.
+  eps : float
+      Small positive regularization.
+  dtype : numeric type
+      Dtype for all arrays (default float32).
+
+  Returns
+  -------
+  design_results : dict or None
+  """
+  nx = plant_data['nx']
+  nu = plant_data['nu']
+  nρ = plant_data['nρ']
+  nw = plant_data['nw']
+  nz = plant_data['nz']
+  ρ_bounds = plant_data['ρ_bounds']
+  u_bar = np.array(plant_data['u_bar'], dtype=dtype)
+  matrices_func = plant_data['matrices_func']
+
+  h = design_params['h']
+  υ = design_params['υ']
+  δ_val = design_params['δ']
+  ε_γ = design_params['ε_γ']
+  σ_til_val = design_params['σ_til']
+
+  Bnp = list(itertools.product([0, 1], repeat=nρ))
+  Onx = np.zeros((nx, nx), dtype=dtype)
+
+  # Plant matrices
+  A, B, C, E = {}, {}, {}, {}
+  for i in Bnp:
+    ρi = [ρ_bounds[idx][i[idx]] for idx in range(nρ)]
+    mats = matrices_func(ρi)
+    A[i] = cp.Parameter((nx, nx), value=mats['A'].astype(dtype))
+    B[i] = cp.Parameter((nx, nu), value=mats['B'].astype(dtype))
+    C[i] = cp.Parameter((nz, nx), value=mats['Cz'].astype(dtype))
+    E[i] = cp.Parameter((nx, nw), value=mats['E'].astype(dtype))
+
+  # e vectors: 5*nx + nu + nw
+  e = nm.get_e(5*[nx] + [nu, nw])
+  for i in range(1, len(e)):
+    e[i] = cp.Parameter(e[i].shape, value=e[i].astype(dtype))
+
+  # Variables
+  Ptil = cp.Variable((nx, nx), PSD=True)
+  Mtil = cp.Variable((2*nx + nu, 2*nx + nu), PSD=True)
+  Q1til = cp.Variable((nx, nx), symmetric=True)
+  Q2til = cp.Variable((nx, nx))
+  Q3til = cp.Variable((nx, nu))
+  Q4til = cp.Variable((nx, nx))
+  S1til = cp.Variable((nx, nx), symmetric=True)
+  S2til = cp.Variable((nx, nx))
+  S3til = cp.Variable((nx, nu))
+  S4til = cp.Variable((nx, nx))
+
+  Ktil, L1til, L2til, ℵ = {}, {}, {}, {}
+  for i in Bnp:
+    Ktil[i] = cp.Variable((nu, nx))
+    L1til[i] = cp.Variable((nu, nx))
+    L2til[i] = cp.Variable((nu, nx))
+    ℵ[i] = cp.Variable((nu, nu), diag=True)
+
+  Rtil = cp.Variable((nx, nx), PSD=True)
+  Ξtil = cp.Variable((nx, nx), PSD=True)
+  γ = cp.Variable(pos=True)
+  δ = cp.Parameter(value=δ_val)
+  σ_til = cp.Parameter(value=σ_til_val)
+  β = cp.Variable(pos=True)
+  X = cp.Variable((nx, nx))
+  Ytil = cp.Variable((2*nx, e[1].shape[1]))
+
+  Rcal = cp.bmat([[Rtil, Onx], [Onx, 3*Rtil]])
+  Fscr = e[1].T + υ*e[2].T + υ*e[4].T
+  κ1 = cp.bmat([[e[2]], [e[6]], [e[5]]])
+  κ2 = cp.bmat([[e[1]-e[2]], [e[1]+e[2]-2*e[3]]])
+
+  constraints = []
+  for i in Bnp:
+    constraints += [ℵ[i] >> eps*np.eye(nu, dtype=dtype)]
+
+  def get_Λ(i, j):
+    Bscr = A[i] @ X @ e[1] + B[i] @ Ktil[j] @ e[2] - \
+        X @ e[4] + B[i] @ Ktil[j] @ e[5] - B[i] @ ℵ[j] @ e[6] + γ * E[i] @ e[7]
+
+    Θ1 = (e[1] - e[2]).T @ S1til @ (e[1] - e[2]) + \
+        nm.He((e[1] - e[2]).T @ (S2til @ e[2] + S3til @ e[6] + S4til @ e[5]))
+
+    Θ2 = nm.He(e[3].T @ (Q2til @ e[2] + Q3til @ e[6] + Q4til @ e[5]))
+
+    Θ3 = nm.He(e[1].T @ (Q1til @ e[3] + Q2til @ e[2] +
+                         Q3til @ e[6] + Q4til @ e[5]))
+
+    Θ4 = nm.He(e[4].T @ (S1til @ (e[1] - e[2]) + S2til @
+               e[2] + S3til @ e[6] + S4til @ e[5])) + \
+        e[4].T @ Rtil @ e[4]
+
+    Θ5 = e[6].T @ (ℵ[j] @ e[6] - L1til[j] @ e[2] - L2til[j] @ e[5])
+
+    Θtil = {}
+    Θtil['0'] = e[2].T @ Ξtil @ e[2] - σ_til * e[5].T @ Ξtil @ e[5] - Θ1 - \
+        h * e[3].T @ Q1til @ e[3] + h * Θ3 - γ * e[7].T @ e[7] + \
+        h * κ1.T @ Mtil @ κ1 + h * e[4].T @ Rtil @ e[4] - Θ5 + \
+        nm.He(e[1].T @ Ptil @ e[4] + Fscr @ Bscr - κ2.T @ Ytil) + h * Θ4
+
+    Θtil['h'] = e[2].T @ Ξtil @ e[2] - σ_til * e[5].T @ Ξtil @ e[5] - Θ1 - \
+        h * Θ2 - h * e[3].T @ Q1til @ e[3] - γ * e[7].T @ e[7] - \
+        h * κ1.T @ Mtil @ κ1 - Θ5 + \
+        nm.He(e[1].T @ Ptil @ e[4] + Fscr @ Bscr - κ2.T @ Ytil)
+
+    Γ1_11 = Θtil['0']
+    Γ1_12 = e[1].T @ X.T @ C[i].T
+
+    Γ1_21 = Γ1_12.T
+    Γ1_22 = - np.eye(nz)
+
+    Γ1 = cp.bmat([[Γ1_11, Γ1_12],
+                  [Γ1_21, Γ1_22]])
+
+    Γ2_11 = Θtil['h']
+    Γ2_12 = Ytil.T
+    Γ2_13 = e[1].T @ X.T @ C[i].T
+
+    Γ2_21 = Γ2_12.T
+    Γ2_22 = - (1. / h) * Rcal
+    Γ2_23 = np.zeros((2 * nx, nz))
+
+    Γ2_31 = Γ2_13.T
+    Γ2_32 = Γ2_23.T
+    Γ2_33 = - np.eye(nz)
+
+    Γ2 = cp.bmat([[Γ2_11, Γ2_12, Γ2_13],
+                  [Γ2_21, Γ2_22, Γ2_23],
+                  [Γ2_31, Γ2_32, Γ2_33]])
+
+    return Γ1, Γ2
+
+  # Binary pair LMIs
+  for pairs in nm.binary_pairs(nρ):
+    LMI_SUM = {'0': 0., 'h': 0.}
+    for pair in pairs:
+      Λ0, Λh = get_Λ(pair[0], pair[1])
+      LMI_SUM['0'] += Λ0
+      LMI_SUM['h'] += Λh
+    constraints += [LMI_SUM['0'] << -eps *
+                    np.eye(LMI_SUM['0'].shape[0], dtype=dtype)]
+    constraints += [LMI_SUM['h'] << -eps *
+                    np.eye(LMI_SUM['h'].shape[0], dtype=dtype)]
+
+  # Saturation LMIs
+  for ell in range(nu):
+    for j in Bnp:
+      LMISAT11 = Ptil - Ξtil
+      LMISAT12 = np.zeros((nx, nx), dtype=dtype)
+      LMISAT13 = (Ktil[j][ell:ell+1]-L1til[j][ell:ell+1]).T
+      LMISAT14 = (Ktil[j][ell:ell+1]-L1til[j][ell:ell+1]).T
+
+      LMISAT21 = LMISAT12.T
+      LMISAT22 = (1. / σ_til) * Ξtil
+      LMISAT23 = (Ktil[j][ell:ell+1]-L2til[j][ell:ell+1]).T
+      LMISAT24 = (Ktil[j][ell:ell+1]-L2til[j][ell:ell+1]).T
+
+      LMISAT31 = LMISAT13.T
+      LMISAT32 = LMISAT23.T
+      LMISAT33 = (u_bar[ell]**2)*np.eye(1, dtype=dtype)
+      LMISAT34 = np.zeros((1, 1), dtype=dtype)
+
+      LMISAT41 = LMISAT14.T
+      LMISAT42 = LMISAT24.T
+      LMISAT43 = LMISAT34.T
+      LMISAT44 = γ*δ*(u_bar[ell]**2)*np.eye(1, dtype=dtype)
+
+      LMISAT = cp.bmat(
+          [[LMISAT11, LMISAT12, LMISAT13, LMISAT14],
+           [LMISAT21, LMISAT22, LMISAT23, LMISAT24],
+           [LMISAT31, LMISAT32, LMISAT33, LMISAT34],
+           [LMISAT41, LMISAT42, LMISAT43, LMISAT44]])
+
+      constraints += [LMISAT >> 0]
+
+  # Incremental LMID0
+  LMID0_11 = β * np.eye(nx)
+  LMID0_12 = np.eye(nx)
+  LMID0_21 = np.eye(nx)
+  LMID0_22 = X + X.T - Ptil
+
+  LMID0 = cp.bmat([[LMID0_11, LMID0_12],
+                   [LMID0_21, LMID0_22]])
+
+  constraints += [LMID0 >> 0]
+
+  # Positive definite constraints
+  constraints += [Ξtil >> eps*np.eye(nx, dtype=dtype)]
+  constraints += [γ >= ε_γ]
+
+  # Objective
+  obj = cp.Minimize(β)
+  prob = cp.Problem(obj, constraints)
+  prob.solve(solver=cp.MOSEK, verbose=False, ignore_dpp=True)
+
+  # Results
+  design_results = None
+  if prob.status not in ["infeasible", "unbounded"]:
+    Xinv = np.linalg.inv(X.value.astype(dtype))
+    Ξ = Xinv.T @ Ξtil.value.astype(dtype) @ Xinv
+    P = Xinv.T @ Ptil.value.astype(dtype) @ Xinv
+    S2 = Xinv.T @ S2til.value.astype(dtype) @ Xinv
+
+    K = {i: Ktil[i].value.astype(dtype)@Xinv for i in Bnp}
+    L1 = {i: L1til[i].value.astype(dtype)@Xinv for i in Bnp}
+    L2 = {i: L2til[i].value.astype(dtype)@Xinv for i in Bnp}
+
+    etm_results = {'Ξ': Ξ, 'σ_til': σ_til_val}
+    design_results = {
+        'optimal_value': prob.value,
+        'etm': etm_results,
+        'controller': {'K': K, 'L1': L1, 'L2': L2},
+        'lyapunov': [P, S2],
+        'bounds': [γ.value, β.value]
+    }
+  return design_results
+
+
 class DETM(System):
   def __init__(self, Ξ: np.ndarray, Ψ: np.ndarray, λ: float, θ: float, name: str = 'DETM'):
     super().__init__(name=name, dynamics=None, output_func=None)
@@ -871,6 +1107,58 @@ class SETM(System):
 
   def _output_func(self, t: float, states: np.ndarray, inputs: dict):
     return np.array([[0.0]])
+
+
+class AETM(System):
+  def __init__(self, Ξ: np.ndarray, σ_til: float, name: str = 'AETM'):
+    super().__init__(name=name, dynamics=None, output_func=None)
+    self.Ξ = Ξ
+    self.σ_til = σ_til
+    self.xm = None
+    self.x_hat = None
+    self.σ0 = None
+
+    self.dynamics = self._dynamics
+    self.output_func = self._output_func
+
+  @property
+  def σ(self):
+    return self.states
+
+  @σ.setter
+  def σ(self, value):
+    self.states = value
+
+  def set_σ0(self, σ0: float):
+    self.σ0 = np.array([[σ0]])
+    self.σ = self.σ0.copy()
+
+  def reset(self):
+    if self.σ0 is not None:
+      self.σ = self.σ0.copy()
+
+  def triggering_condition(self) -> bool:
+    x = self.xm
+    ε = self.x_hat - x
+    val = (self.σ[0, 0] * x.T @ self.Ξ @ x - ε.T @ self.Ξ @ ε)[0][0]
+    return val < 0
+
+  def _dynamics(self, t: float, σ: np.ndarray, inputs, params=None):
+    ε = self.x_hat - self.xm
+    ε_quad = (ε.T @ self.Ξ @ ε)[0][0]
+    σ_val = σ[0, 0]
+    # Avoid division by zero if sigma is very small (though update clamps it)
+    if σ_val < 1e-8:
+      σ_val = 1e-8
+    dσ = (1.0 / σ_val) * ((1.0 / σ_val) - self.σ_til) * ε_quad
+    return np.array([[dσ]])
+
+  def update(self, t: float, inputs: Dict[str, Any], dt: float):
+    super().update(t, inputs, dt)
+    self.states = np.maximum(self.states, 1e-6)
+
+  def _output_func(self, t: float, states: np.ndarray, inputs: dict):
+    return states
 
 
 class SETMST(System):
