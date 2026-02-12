@@ -18,7 +18,7 @@ _Universidade Federal do Amazonas (UFAM)_
 > [!NOTE]
 > **Status de Desenvolvimento** > O foco atual é a refatoração completa dos códigos da dissertação ([TEDE UFAM](https://tede.ufam.edu.br/handle/tede/11191)) e a implementação de novos cenários complexos para a tese, incluindo sistemas LPV, tolerância a falhas e segurança cibernética.
 
-## 📋 Sobre o Projeto
+Este repositório contém uma estrutura em Python para o projeto (síntese) e simulação de estratégias de controle baseadas em eventos. O foco atual inclui o Controle Acionado por Eventos (ETC) aplicado a sistemas Lineares com Parâmetros Variantes (LPV), mas a arquitetura permite a extensão para outros tipos de sistemas e mecanismos de acionamento, considerando perturbações externas e saturação nos atuadores.
 
 Este repositório contém um framework robusto em Python para **síntese, simulação e análise de estratégias de Controle Acionado por Eventos (ETC)**. O projeto consolida a pesquisa iniciada no mestrado (2024-2025) e expandida no doutorado, focando na reprodutibilidade científica e na extensão para sistemas complexos.
 
