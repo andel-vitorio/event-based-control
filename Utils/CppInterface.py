@@ -37,16 +37,17 @@ class CppSimulator:
     if self.exe_path is None:
       raise FileNotFoundError(f"Executable '{filename}' not found.")
 
-  def run(self, json_config_path, x0, u_constant=0.0, closed_loop=False):
+  def run(self, json_config_path, x0, u_constant=0.0, closed_loop=False, recurrence=False):
     """
     Executes the C++ simulation and decodes the multi-vector binary stream.
-    Handles dynamic dimensions for Open-Loop and Closed-Loop modes.
+    Handles dynamic dimensions for Open-Loop, Closed-Loop, and Recurrence modes.
 
     Args:
         json_config_path (str): Path to the experiment configuration.
         x0 (list/np.ndarray): Initial state vector.
         u_constant (float): Constant input for open-loop simulation.
-        closed_loop (bool): Flag to trigger the SETM kernel in the backend.
+        closed_loop (bool): Flag to trigger the SETM RK5 kernel.
+        recurrence (bool): Flag to trigger the Discrete-Time Recurrence Map kernel.
 
     Returns:
         dict: Dictionary containing 'y', 'x', 'u', 't', and 'event_times'.
@@ -54,9 +55,12 @@ class CppSimulator:
     x0_str = ",".join(map(str, np.array(x0).flatten()))
     abs_json_path = os.path.abspath(json_config_path)
 
-    # Execution command with optional --closed flag
+    # Execution command construction with specific kernel flags
     cmd = [self.exe_path, abs_json_path, x0_str, str(u_constant)]
-    if closed_loop:
+
+    if recurrence:
+      cmd.append("--recurrence")
+    elif closed_loop:
       cmd.append("--closed")
 
     try:
@@ -87,13 +91,14 @@ class CppSimulator:
         offset += bytes_to_read
         return data.reshape(shape) if shape else data
 
-      # Extract vectors sequentially according to the binary protocol
+      # Extract vectors sequentially according to the binary protocol.
+      # In recurrence mode, total_steps is 0, resulting in empty arrays.
       time_history = fetch_data(total_steps)
       y_hist = fetch_data(total_steps * ny, (total_steps, ny))
       x_hist = fetch_data(total_steps * nx, (total_steps, nx))
       u_hist = fetch_data(total_steps * nu, (total_steps, nu))
 
-      # Remaining data in buffer represents event instants
+      # Event instants (extracted from the remaining buffer based on n_events)
       event_times = fetch_data(n_events)
 
       return {

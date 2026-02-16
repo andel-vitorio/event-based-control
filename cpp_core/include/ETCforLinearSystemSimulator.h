@@ -62,6 +62,20 @@ public:
       const Numeric::Vector &x0,
       double dt,
       int n_steps);
+
+  /**
+   * @brief Computes event times using the discrete-time recurrence map logic.
+   * @param sys The state-space plant model.
+   * @param ctrl SETM parameters (K, Xi, Psi, h, iet_max).
+   * @param x0 Initial state vector.
+   * @param duration Total simulation duration in seconds.
+   * @return std::vector<double> Vector containing only the time instants of events.
+   */
+  static std::vector<double> run_recurrence_map_setm(
+      const StateSpace &sys,
+      const Control::SETMParams &ctrl,
+      const Numeric::Vector &x0,
+      double duration);
 };
 
 #endif

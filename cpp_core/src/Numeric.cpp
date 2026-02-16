@@ -1,50 +1,140 @@
-#include "Numeric.h"
+/**
+ * @file Numeric.cpp
+ * @brief High-performance linear algebra and integration utilities.
+ */
+
+#include "../include/Numeric.h"
+#include <stdexcept>
+#include <algorithm>
+#include <cmath>
 
 namespace Numeric
 {
-
-  /** Computes the matrix-vector product y = Ax. */
   Vector mat_vec_mul(const Matrix &A, const Vector &x)
   {
-    size_t rows = A.size();
-    size_t cols = A[0].size();
-    Vector y(rows, 0.0);
-
-    for (size_t i = 0; i < rows; ++i)
-    {
-      for (size_t j = 0; j < cols; ++j)
-      {
+    Vector y(A.size(), 0.0);
+    for (size_t i = 0; i < A.size(); ++i)
+      for (size_t j = 0; j < x.size(); ++j)
         y[i] += A[i][j] * x[j];
-      }
-    }
     return y;
   }
 
-  /** Computes the linear combination res = a*x + b*y. */
+  Matrix mat_mul(const Matrix &A, const Matrix &B)
+  {
+    Matrix res(A.size(), Vector(B[0].size(), 0.0));
+    for (size_t i = 0; i < A.size(); ++i)
+      for (size_t k = 0; k < A[0].size(); ++k)
+        for (size_t j = 0; j < B[0].size(); ++j)
+          res[i][j] += A[i][k] * B[k][j];
+    return res;
+  }
+
   Vector vec_add(const Vector &x, const Vector &y, double a, double b)
   {
-    size_t n = x.size();
-    Vector res(n);
-    for (size_t i = 0; i < n; ++i)
-    {
+    Vector res(x.size());
+    for (size_t i = 0; i < x.size(); ++i)
       res[i] = a * x[i] + b * y[i];
+    return res;
+  }
+
+  Matrix mat_add(const Matrix &A, const Matrix &B, double a, double b)
+  {
+    Matrix res(A.size(), Vector(A[0].size()));
+    for (size_t i = 0; i < A.size(); ++i)
+      for (size_t j = 0; j < A[0].size(); ++j)
+        res[i][j] = a * A[i][j] + b * B[i][j];
+    return res;
+  }
+
+  Matrix mat_scalar_mul(const Matrix &A, double scalar)
+  {
+    Matrix res = A;
+    for (auto &row : res)
+      for (auto &val : row)
+        val *= scalar;
+    return res;
+  }
+
+  Matrix identity(size_t n)
+  {
+    Matrix res(n, Vector(n, 0.0));
+    for (size_t i = 0; i < n; ++i)
+      res[i][i] = 1.0;
+    return res;
+  }
+
+  Matrix expm(const Matrix &M)
+  {
+    const size_t n = M.size();
+    Matrix res = identity(n);
+    Matrix term = identity(n);
+
+    for (int i = 1; i <= 30; ++i)
+    {
+      term = mat_mul(term, M);
+      term = mat_scalar_mul(term, 1.0 / static_cast<double>(i));
+      res = mat_add(res, term);
+
+      double norm = 0.0;
+      for (const auto &row : term)
+        for (double val : row)
+          norm += std::abs(val);
+
+      if (norm < 1e-18)
+        break;
     }
     return res;
   }
 
-  /** Computes the multiply-accumulate operation res = x + scale*k. */
+  void discretize_zoh(const Matrix &A, const Matrix &B, double h, Matrix &Ad, Matrix &Bd)
+  {
+    const size_t nx = A.size();
+    const size_t nu = B[0].size();
+    const size_t dim = nx + nu;
+    Matrix M(dim, Vector(dim, 0.0));
+
+    for (size_t i = 0; i < nx; ++i)
+    {
+      for (size_t j = 0; j < nx; ++j)
+        M[i][j] = A[i][j] * h;
+      for (size_t j = 0; j < nu; ++j)
+        M[i][nx + j] = B[i][j] * h;
+    }
+
+    Matrix expM = expm(M);
+    Ad = Matrix(nx, Vector(nx));
+    Bd = Matrix(nx, Vector(nu));
+
+    for (size_t i = 0; i < nx; ++i)
+    {
+      for (size_t j = 0; j < nx; ++j)
+        Ad[i][j] = expM[i][j];
+      for (size_t j = 0; j < nu; ++j)
+        Bd[i][j] = expM[i][nx + j];
+    }
+  }
+
+  double scalar_quadratic_form(const Vector &x, const Matrix &M)
+  {
+    double result = 0.0;
+    for (size_t i = 0; i < x.size(); ++i)
+    {
+      double tmp = 0.0;
+      for (size_t j = 0; j < x.size(); ++j)
+        tmp += M[i][j] * x[j];
+      result += x[i] * tmp;
+    }
+    return result;
+  }
+
   Vector vec_mac(const Vector &x, const Vector &k, double scale)
   {
-    size_t n = x.size();
-    Vector res(n);
-    for (size_t i = 0; i < n; ++i)
-    {
+    Vector res(x.size());
+    for (size_t i = 0; i < x.size(); ++i)
       res[i] = x[i] + scale * k[i];
-    }
     return res;
   }
 
-  /** Performs a single integration step using the Cash-Karp Runge-Kutta method (5th order). */
   Vector rk5_step(const Matrix &A, const Matrix &B, const Vector &x, const Vector &u, double dt)
   {
     Vector Ax = mat_vec_mul(A, x);
@@ -82,22 +172,5 @@ namespace Numeric
     sum_k = vec_add(sum_k, k6, 1.0, 2.0 / 55.0);
 
     return vec_mac(x, sum_k, dt);
-  }
-
-  double scalar_quadratic_form(const Vector &x, const Matrix &M)
-  {
-    double result = 0.0;
-    size_t n = x.size();
-
-    for (size_t i = 0; i < n; ++i)
-    {
-      double row_dot_x = 0.0;
-      for (size_t j = 0; j < n; ++j)
-      {
-        row_dot_x += M[i][j] * x[j];
-      }
-      result += x[i] * row_dot_x;
-    }
-    return result;
   }
 }
