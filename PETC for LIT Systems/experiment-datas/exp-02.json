@@ -1,17 +1,21 @@
 {
-  "name": "exp1",
-  "duration": 10,
-  "dt": 1e-4,
+  "name": "pendulo-invertido",
+  "duration": 5,
+  "dt": 1e-5,
   "plant": {
     "system_matrices": {
       "A": [
-        ["0.0", "1.0"],
-        ["3.75", "0.0"]
+        ["0.0", "1.0", "0.0", "0.0"],
+        ["0.0", "0.0", "-5.0", "0.0"],
+        ["0.0", "0.0", "0.0", "1.0"],
+        ["0.0", "0.0", "30.0", "0.0"]
       ],
-      "B": [["0."], ["0.25"]],
+      "B": [["0."], ["0.5"], ["0"], ["-1.0"]],
       "C": [
-        ["1.", "0."],
-        ["0.", "1."]
+        ["1.", "0.", "0.", "0."],
+        ["0.", "1.", "0.", "0."],
+        ["0.", "0.", "1.", "0."],
+        ["0.", "0.", "0.", "1."]
       ],
       "E": null,
       "D": null,
@@ -29,25 +33,45 @@
       "parameters": null,
       "states": {
         "x1": {
-          "name": "Posição Angular",
+          "name": "Estado 1",
           "symbol": "$x_1$",
           "unit": ""
         },
         "x2": {
-          "name": "Velocidade Angular",
+          "name": "Estado 2",
           "symbol": "$x_2$",
+          "unit": ""
+        },
+        "x3": {
+          "name": "Estado 3",
+          "symbol": "$x_3$",
+          "unit": ""
+        },
+        "x4": {
+          "name": "Estado 4",
+          "symbol": "$x_4$",
           "unit": ""
         }
       },
       "outputs": {
         "y1": {
-          "name": "Posição Angular",
+          "name": "Saída 1",
           "symbol": "$x_1$",
           "unit": ""
         },
         "y2": {
-          "name": "Velocidade Angular",
+          "name": "Saída 2",
           "symbol": "$x_2$",
+          "unit": ""
+        },
+        "y3": {
+          "name": "Saída 3",
+          "symbol": "$x_3$",
+          "unit": ""
+        },
+        "y4": {
+          "name": "Saída 4",
+          "symbol": "$x_4$",
           "unit": ""
         }
       },
