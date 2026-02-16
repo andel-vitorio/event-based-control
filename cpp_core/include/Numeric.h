@@ -64,6 +64,14 @@ namespace Numeric
    * @return Vector The estimated state at t + dt.
    */
   Vector rk5_step(const Matrix &A, const Matrix &B, const Vector &x, const Vector &u, double dt);
+
+  /**
+   * Calcula o valor escalar da forma quadrática x' * M * x.
+   * @param x Vetor de estado (n x 1)
+   * @param M Matriz de peso (n x n)
+   * @return Escalar resultante
+   */
+  double scalar_quadratic_form(const Vector &x, const Matrix &M);
 }
 
 #endif

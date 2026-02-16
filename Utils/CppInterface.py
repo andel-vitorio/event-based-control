@@ -6,83 +6,58 @@ import sys
 
 
 class CppSimulator:
-  def __init__(self, exe_name="LinearStateSpaceSimulator"):
+  def __init__(self, exe_name="ETCforLinearSystemSimulator"):
     """
-    Initializes the C++ simulator interface.
-
-    Implements a search strategy to locate the compiled executable, prioritizing
-    local build directories over system-wide installations.
+    Initializes the C++ simulator interface with metadata-aware binary streaming.
 
     Args:
-        exe_name (str): Name of the executable file (without extension).
+        exe_name (str): Name of the compiled C++ executable.
     """
     ext = ".exe" if sys.platform == "win32" else ""
     filename = f"{exe_name}{ext}"
 
     self.exe_path = None
-
     cwd = os.getcwd()
 
+    # Positional heuristics to locate the binary regardless of installation mode
     possible_paths = [
         os.path.join(cwd, "bin", filename),
         os.path.join(os.path.dirname(cwd), "bin", filename),
-        # Level 2: bin/ in grandparent folder (e.g., running from Utils/ or subfolder)
         os.path.join(os.path.dirname(
             os.path.dirname(cwd)), "bin", filename),
-        # Fallback: Relative to lib installation (editable mode)
         os.path.join(os.path.dirname(os.path.dirname(
             os.path.abspath(__file__))), "bin", filename)
     ]
 
-    # Validation loop (Stops on first match)
     for path in possible_paths:
       if os.path.exists(path):
         self.exe_path = os.path.abspath(path)
         break
 
     if self.exe_path is None:
-      raise FileNotFoundError(
-          f"Executable '{filename}' not found.\n"
-          f"Search paths included 'bin/' directories near: {cwd}\n"
-          f"Ensure the project is built and you are running from the project root."
-      )
+      raise FileNotFoundError(f"Executable '{filename}' not found.")
 
-  def _get_ny_from_json(self, json_path):
+  def run(self, json_config_path, x0, u_constant=0.0, closed_loop=False):
     """
-    Helper to extract the number of outputs (ny) from the JSON configuration.
+    Executes the C++ simulation and decodes the multi-vector binary stream.
+    Handles dynamic dimensions for Open-Loop and Closed-Loop modes.
 
     Args:
-        json_path (str): Path to the JSON file.
+        json_config_path (str): Path to the experiment configuration.
+        x0 (list/np.ndarray): Initial state vector.
+        u_constant (float): Constant input for open-loop simulation.
+        closed_loop (bool): Flag to trigger the SETM kernel in the backend.
 
     Returns:
-        int or None: Number of rows in matrix C, or None if parsing fails.
-    """
-    try:
-      with open(json_path, 'r') as f:
-        config = json.load(f)
-      return len(config['plant']['system_matrices']['C'])
-    except:
-      return None
-
-  def run(self, json_config_path, x0, u_constant=0.0):
-    """
-    Executes the C++ simulation.
-
-    Args:
-        json_config_path (str): Path to the experiment configuration JSON.
-        x0 (list or np.ndarray): Initial state vector.
-        u_constant (float): Constant control input value.
-
-    Returns:
-        np.ndarray: Simulation results matrix [time, y1, ..., yny].
-
-    Raises:
-        RuntimeError: If the C++ process fails or returns an error code.
+        dict: Dictionary containing 'y', 'x', 'u', 't', and 'event_times'.
     """
     x0_str = ",".join(map(str, np.array(x0).flatten()))
     abs_json_path = os.path.abspath(json_config_path)
 
+    # Execution command with optional --closed flag
     cmd = [self.exe_path, abs_json_path, x0_str, str(u_constant)]
+    if closed_loop:
+      cmd.append("--closed")
 
     try:
       process = subprocess.Popen(
@@ -93,18 +68,42 @@ class CppSimulator:
       stdout_data, stderr_data = process.communicate()
 
       if process.returncode != 0:
-        raise RuntimeError(
-            f"C++ Error: {stderr_data.decode('utf-8', errors='replace')}")
+        raise RuntimeError(f"C++ Error: {stderr_data.decode('utf-8')}")
 
-      raw_data = np.frombuffer(stdout_data, dtype=np.float64)
+      # --- 1. Decode Metadata Header (5 uint32 = 20 bytes) ---
+      # Header provides [ny, nx, nu, n_events, total_steps]
+      header = np.frombuffer(stdout_data[:20], dtype=np.uint32)
+      ny, nx, nu, n_events, total_steps = header
 
-      if raw_data.size == 0:
-        return np.empty((0, 0))
+      # --- 2. Dynamic Stream Slicing ---
+      offset = 20
 
-      ny = self._get_ny_from_json(abs_json_path)
-      if ny is not None:
-        return raw_data.reshape(-1, 1 + ny)
-      return raw_data
+      def fetch_data(count, shape=None):
+        """Helper to extract slices from the binary buffer based on header counts."""
+        nonlocal offset
+        bytes_to_read = count * 8  # Each double is 8 bytes
+        chunk = stdout_data[offset: offset + bytes_to_read]
+        data = np.frombuffer(chunk, dtype=np.float64)
+        offset += bytes_to_read
+        return data.reshape(shape) if shape else data
+
+      # Extract vectors sequentially according to the binary protocol
+      time_history = fetch_data(total_steps)
+      y_hist = fetch_data(total_steps * ny, (total_steps, ny))
+      x_hist = fetch_data(total_steps * nx, (total_steps, nx))
+      u_hist = fetch_data(total_steps * nu, (total_steps, nu))
+
+      # Remaining data in buffer represents event instants
+      event_times = fetch_data(n_events)
+
+      return {
+          't': time_history,
+          # Transpose to (ny, n_steps) for legacy compatibility
+          'y': y_hist.T,
+          'x': x_hist.T,
+          'u': u_hist.T,
+          'event_times': event_times
+      }
 
     except Exception as e:
       raise RuntimeError(f"Simulation failed: {e}")

@@ -80,18 +80,37 @@ ExperimentConfig ConfigLoader::load(const std::string &json_path)
   // If D is null/empty, initialize with zeros based on C and B dimensions.
   // D dimensions: (ny x nu), where ny = rows of C, nu = cols of B.
   int ny = config.plant.C.size();
-  int nu = config.plant.B[0].size();
+  int nu = config.plant.B.empty() ? 0 : config.plant.B[0].size();
   config.plant.D = ensure_matrix(D_raw, ny, nu);
 
-  // --- Design Parameters ---
-  // Access design_params -> dspetc -> h
-  if (j.contains("design_params") && j["design_params"].contains("dspetc"))
+  // --- Control and ETM Parameters (Results Section) ---
+  if (j.contains("results"))
   {
-    config.design_h = j["design_params"]["dspetc"].value("h", 0.001);
+    const auto &res = j["results"];
+
+    if (res.contains("controller") && res["controller"].contains("K"))
+      config.ctrl.K = parse_matrix(res["controller"]["K"]);
+
+    if (res.contains("etm"))
+    {
+      config.ctrl.Xi = parse_matrix(res["etm"]["Xi"]);
+      config.ctrl.Psi = parse_matrix(res["etm"]["Psi"]);
+    }
   }
-  else
+
+  // --- Design Parameters ---
+  if (j.contains("design_params"))
   {
-    config.design_h = 0.001; // Default
+    const auto &dp = j["design_params"];
+
+    // Sampling period h
+    if (dp.contains("dspetc"))
+      config.ctrl.h = dp["dspetc"].value("h", 0.001);
+    else
+      config.ctrl.h = dp.value("h", 0.001);
+
+    // Maximum Inter-Event Time
+    config.ctrl.iet_max = dp.value("iet_max", 1e12);
   }
 
   return config;

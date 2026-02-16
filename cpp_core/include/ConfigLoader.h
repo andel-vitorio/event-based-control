@@ -3,21 +3,21 @@
 
 #include <string>
 #include "DynamicalSystem.h"
-#include "Simulator.h"
+#include "ETCforLinearSystemSimulator.h"
 
 /**
  * @brief Configuration structure for a simulation experiment.
  *
  * Holds parameters defining the simulation environment, timing,
- * and the dynamical system (plant) to be simulated.
+ * the dynamical system (plant), and control/ETM parameters.
  */
 struct ExperimentConfig
 {
-  std::string name; ///< Name of the experiment or system configuration.
-  double duration;  ///< Total duration of the simulation in seconds.
-  double dt;        ///< Time step for the numerical integration (simulation step).
-  StateSpace plant; ///< The state-space representation of the plant.
-  double design_h;  ///< Sampling period (h) used in event-triggered designs.
+  std::string name;         ///< Name of the experiment or system configuration.
+  double duration;          ///< Total duration of the simulation in seconds.
+  double dt;                ///< Time step for the numerical integration (simulation step).
+  StateSpace plant;         ///< The state-space representation of the plant.
+  Control::SETMParams ctrl; ///< Parameters for the controller and Event-Triggered Mechanism.
 };
 
 /**
@@ -32,8 +32,8 @@ public:
   /**
    * @brief Loads an experiment configuration from a JSON file.
    *
-   * Parses the specified JSON file to extract simulation parameters
-   * and system matrices.
+   * Parses the specified JSON file to extract simulation parameters,
+   * system matrices, and optimization results (K, Xi, Psi).
    *
    * @param json_path Path to the JSON configuration file.
    * @return ExperimentConfig The populated configuration structure.

@@ -63,6 +63,14 @@
     }
   },
   "design_params": {
+    "save": true,
+    "h": 1e-3,
+    "υ": 1e-1,
+    "δ": 10.0,
+    "ε_γ": 1e-1,
+    "λ": 1e-1,
+    "θ": 1.01,
+    "iet_max": 25e-2,
     "dspetc": {
       "save": true,
       "h": 1e-3,

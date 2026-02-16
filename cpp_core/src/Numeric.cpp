@@ -83,4 +83,21 @@ namespace Numeric
 
     return vec_mac(x, sum_k, dt);
   }
+
+  double scalar_quadratic_form(const Vector &x, const Matrix &M)
+  {
+    double result = 0.0;
+    size_t n = x.size();
+
+    for (size_t i = 0; i < n; ++i)
+    {
+      double row_dot_x = 0.0;
+      for (size_t j = 0; j < n; ++j)
+      {
+        row_dot_x += M[i][j] * x[j];
+      }
+      result += x[i] * row_dot_x;
+    }
+    return result;
+  }
 }
