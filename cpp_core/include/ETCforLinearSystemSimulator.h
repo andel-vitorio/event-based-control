@@ -76,6 +76,16 @@ public:
       const Control::SETMParams &ctrl,
       const Numeric::Vector &x0,
       double duration);
+
+  /**
+   * @brief Gera sequências simbólicas em paralelo usando OpenMP.
+   * Substitui o build_symbolic_graph_robust do Python.
+   */
+  static std::vector<std::vector<int>> run_parallel_symbolic_sequences(
+      const StateSpace &sys,
+      const Control::SETMParams &ctrl,
+      const std::vector<Numeric::Vector> &initial_states,
+      double duration);
 };
 
 #endif

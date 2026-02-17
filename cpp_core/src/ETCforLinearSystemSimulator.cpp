@@ -8,9 +8,6 @@
 #include <cmath>
 #include <algorithm>
 
-/**
- * @brief Runs an open-loop simulation with a constant input.
- */
 SimulationResult Simulator::run_open_loop(
     const StateSpace &sys,
     const Numeric::Vector &x0,
@@ -44,9 +41,6 @@ SimulationResult Simulator::run_open_loop(
   return res;
 }
 
-/**
- * @brief Runs a closed-loop simulation using SETM logic (RK5 step-by-step).
- */
 SimulationResult Simulator::run_closed_loop_setm(
     const StateSpace &sys,
     const Control::SETMParams &ctrl,
@@ -103,10 +97,6 @@ SimulationResult Simulator::run_closed_loop_setm(
   return res;
 }
 
-/**
- * @brief Simulates the system using the Discrete-Time Recurrence Map.
- * Synchronized with Python/Numba 'search_next_event' kernel.
- */
 std::vector<double> Simulator::run_recurrence_map_setm(
     const StateSpace &sys,
     const Control::SETMParams &ctrl,
@@ -169,4 +159,34 @@ std::vector<double> Simulator::run_recurrence_map_setm(
     x_tk = x_mh;
   }
   return event_times;
+}
+
+std::vector<std::vector<int>> Simulator::run_parallel_symbolic_sequences(
+    const StateSpace &sys,
+    const Control::SETMParams &ctrl,
+    const std::vector<Numeric::Vector> &initial_states,
+    double duration)
+{
+  int num_samples = initial_states.size();
+  std::vector<std::vector<int>> all_sequences(num_samples);
+
+#pragma omp parallel for schedule(dynamic)
+  for (int i = 0; i < num_samples; ++i)
+  {
+    std::vector<double> event_times = run_recurrence_map_setm(
+        sys, ctrl, initial_states[i], duration);
+
+    std::vector<int> k_seq;
+    if (event_times.size() > 1)
+    {
+      for (size_t j = 1; j < event_times.size(); ++j)
+      {
+        double delta = event_times[j] - event_times[j - 1];
+        k_seq.push_back(static_cast<int>(std::round(delta / ctrl.h)));
+      }
+    }
+    all_sequences[i] = k_seq;
+  }
+
+  return all_sequences;
 }
