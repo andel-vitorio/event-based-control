@@ -6,6 +6,9 @@ Provides strict I/O handling and native OpenMP parallel processing support.
 Ensures determinism and bypasses Windows CLI limits using binary state transfer.
 """
 
+from fractions import Fraction as PyFraction
+from z3 import Solver, Real, sat, Q
+from scipy.signal import cont2discrete
 import networkx as nx
 from pyvis.network import Network
 import numpy as np
@@ -13,6 +16,7 @@ import json
 import os
 import tempfile
 from Utils.CppInterface import CppSimulator
+import Utils.Numeric as nm
 
 # Single internal instance to manage the executable path
 _backend = CppSimulator(exe_name="ETCforLinearSystemMain")
@@ -470,3 +474,333 @@ def visualize_graph(G, sequence=None, filename="symbolic_model_final.html"):
   final_html = html_content.replace('</body>', custom_ui)
   with open(filename, "w", encoding="utf-8") as f:
     f.write(final_html)
+
+
+class SequenceReconstructor:
+  """
+  Reconstrutor de estados iniciais (x0) compatíveis com uma sequência de eventos 
+  pré-definida em sistemas de controle baseados em eventos (ETC/SETM).
+
+  Utiliza Z3 para resolver as restrições quadráticas de disparo.
+  """
+
+  def __init__(self, A_c, B_c, K, Xi, Psi, h, iet_max):
+    """
+    Inicializa o reconstrutor e pré-calcula as matrizes de transição e gatilho.
+
+    Args:
+        A_c, B_c: Matrizes do sistema contínuo.
+        K: Ganho do controlador.
+        Xi, Psi: Matrizes de peso do mecanismo de gatilho.
+        h: Passo de discretização.
+        iet_max: Tempo máximo entre eventos.
+    """
+    self.nx = A_c.shape[0]
+    self.h = h
+    self.m_max = int(round(iet_max / h))
+
+    sys_d = cont2discrete((A_c, B_c, np.zeros((1, self.nx)),
+                           np.zeros((1, B_c.shape[1]))), h, method='zoh')
+    self.Ad, self.Bd = sys_d[0], sys_d[1]
+
+    self.Phi_cache = [None] * (self.m_max + 1)
+    self.M_cache = [None] * (self.m_max + 1)
+
+    I = np.eye(self.nx)
+    self.Phi_cache[0] = I
+
+    for m in range(1, self.m_max + 1):
+      Ad_pow_m = np.linalg.matrix_power(self.Ad, m)
+      S_m = np.zeros_like(self.Ad)
+      for p in range(m):
+        S_m += np.linalg.matrix_power(self.Ad, p)
+      Phi_m = Ad_pow_m + S_m @ self.Bd @ K
+      self.Phi_cache[m] = Phi_m
+      diff = I - Phi_m
+      M_val = (Phi_m.T @ Psi @ Phi_m) - (diff.T @ Xi @ diff)
+      self.M_cache[m] = M_val
+
+  def _to_rational(self, matrix):
+    return [[Q(PyFraction(val).limit_denominator(10**10).numerator,
+               PyFraction(val).limit_denominator(10**10).denominator)
+             for val in row] for row in matrix]
+
+  def find_compatible_state(self, sequence):
+    """
+    Busca um vetor x0 não-nulo que gere exatamente a sequência de eventos fornecida.
+
+    Args:
+        sequence (list[int]): Lista de intervalos entre eventos (em passos h).
+
+    Returns:
+        np.array: Vetor de estado x0 válido, ou None se a sequência for impossível.
+    """
+    solver = Solver()
+    x0 = [Real(f'x0_{i}') for i in range(self.nx)]
+    solver.add(sum([x * x for x in x0]) > Q(1, 1000))
+    G_acc = np.eye(self.nx)
+
+    for m_target in sequence:
+      if m_target > self.m_max:
+        return None
+
+      for k in range(1, m_target):
+        M_k = self.M_cache[k]
+        M_proj = G_acc.T @ M_k @ G_acc
+        M_z3 = self._to_rational(M_proj)
+
+        quad_form = sum(x0[r] * M_z3[r][c] * x0[c]
+                        for r in range(self.nx) for c in range(self.nx))
+        solver.add(quad_form >= 0)
+
+      if m_target < self.m_max:
+        M_target_mat = self.M_cache[m_target]
+        M_proj_trig = G_acc.T @ M_target_mat @ G_acc
+        M_z3_trig = self._to_rational(M_proj_trig)
+
+        quad_form_trig = sum(x0[r] * M_z3_trig[r][c] * x0[c]
+                             for r in range(self.nx) for c in range(self.nx))
+        solver.add(quad_form_trig < 0)
+
+      G_acc = self.Phi_cache[m_target] @ G_acc
+
+    if solver.check() == sat:
+      model = solver.model()
+      return np.array([float(model[v].as_fraction()) for v in x0])
+    else:
+      return None
+
+
+def build_symbolic_exactly_graph(target_l, K_set, h, A, B, K, Xi, Psi, iet_max):
+  """
+  Constrói o grafo simbólico crescendo progressivamente o tamanho das palavras.
+  Complexidade reduzida drasticamente ao descartar ramos inviáveis cedo.
+  """
+  print(f"=== [Init] Pré-calculando dinâmicas (Z3 Backend) ===")
+  reconstructor = SequenceReconstructor(A, B, K, Xi, Psi, h, iet_max)
+  valid_sequences = []
+  print(f"--- Camada 1 ---")
+  for k in K_set:
+    seq = (k,)
+    if reconstructor.find_compatible_state(seq) is not None:
+      valid_sequences.append(seq)
+
+  for length in range(2, target_l + 1):
+    print(f"--- Camada {length} ---")
+    next_valid_sequences = []
+    candidates_count = len(valid_sequences) * len(K_set)
+
+    for seq in valid_sequences:
+      for k_next in K_set:
+        candidate = seq + (k_next,)
+
+        if reconstructor.find_compatible_state(candidate) is not None:
+          next_valid_sequences.append(candidate)
+
+    dropped = candidates_count - len(next_valid_sequences)
+    print(
+        f"   Candidatos: {candidates_count} | Válidos: {len(next_valid_sequences)} | Podados: {dropped}")
+
+    if not next_valid_sequences:
+      print("AVISO: Nenhuma sequência válida encontrada neste comprimento!")
+      break
+
+    valid_sequences = next_valid_sequences
+
+  feasible_nodes = valid_sequences
+  feasible_nodes_set = set(feasible_nodes)
+  G = nx.DiGraph()
+  G.add_nodes_from(feasible_nodes)
+
+  print(
+      f"=== [Edges] Gerando arestas (Extensão para tam {target_l + 1}) ===")
+  count_edges = 0
+
+  for node_a in feasible_nodes:
+    suffix = node_a[1:]
+
+    for k_next in K_set:
+      node_b = suffix + (k_next,)
+
+      if node_b in feasible_nodes_set:
+        transition_seq = node_a + (k_next,)
+        if reconstructor.find_compatible_state(transition_seq) is not None:
+          G.add_edge(
+              node_a,
+              node_b,
+              weight=node_a[0],
+              label=str(node_a[0])
+          )
+          count_edges += 1
+
+  print("\n=== Relatório Final ===")
+  print(f"Nós Finais: {len(feasible_nodes)}")
+  print(f"Arestas:    {count_edges}")
+
+  return G
+
+
+class SequenceRegionAnalyzer:
+  """
+  Analyzes and determines the analytical angular regions (cones) in the 
+  phase plane that generate a specific symbolic sequence for linear homogeneous systems.
+  """
+
+  def __init__(self, reconstructor):
+    """
+    Args:
+        reconstructor: Instance of SequenceReconstructor containing 
+                       pre-computed Phi and M matrices.
+    """
+    self.rec = reconstructor
+
+  def _get_angular_interval(self, M):
+    """
+    Computes the angular intervals theta in [0, pi) where the quadratic form x'Mx >= 0.
+    """
+    a = M[1, 1]
+    b = M[0, 1] + M[1, 0]
+    c = M[0, 0]
+
+    delta = b**2 - 4*a*c
+
+    if delta < 0:
+      return [(0, np.pi)] if c >= 0 else []
+
+    t1 = (-b - np.sqrt(delta)) / (2 * a) if a != 0 else -c/b
+    t2 = (-b + np.sqrt(delta)) / (2 * a) if a != 0 else -c/b
+
+    angles = sorted([np.arctan(t1) % np.pi, np.arctan(t2) % np.pi])
+
+    mid_test = angles[0] + (angles[1] - angles[0]) / 2
+    test_vec = np.array([np.cos(mid_test), np.sin(mid_test)])
+
+    if test_vec.T @ M @ test_vec >= 0:
+      return [(angles[0], angles[1])]
+    else:
+      return [(0, angles[0]), (angles[1], np.pi)]
+
+  def find_region(self, sequence):
+    """
+    Identifies the valid [theta_min, theta_max] intervals for a given symbolic sequence.
+
+    Args:
+        sequence (tuple): The target sequence of inter-event steps (k).
+
+    Returns:
+        list: List of tuples representing valid angular intervals in radians.
+    """
+    G_acc = np.eye(2)
+    final_intervals = [(0, np.pi)]
+
+    for m_target in sequence:
+      for k in range(1, m_target):
+        M_eff = G_acc.T @ self.rec.M_cache[k] @ G_acc
+        new_interval = self._get_angular_interval(M_eff)
+        final_intervals = self._intersect(
+            final_intervals, new_interval)
+
+      if m_target < self.rec.m_max:
+        M_eff_trig = G_acc.T @ self.rec.M_cache[m_target] @ G_acc
+        new_interval = self._get_angular_interval(-M_eff_trig)
+        final_intervals = self._intersect(
+            final_intervals, new_interval)
+
+      G_acc = self.rec.Phi_cache[m_target] @ G_acc
+
+    return final_intervals
+
+  def _intersect(self, intervals_a, intervals_b):
+    """Performs intersection of multiple angular interval sets."""
+    res = []
+    for start_a, end_a in intervals_a:
+      for start_b, end_b in intervals_b:
+        s = max(start_a, start_b)
+        e = min(end_a, end_b)
+        if s < e:
+          res.append((s, e))
+    return res
+
+
+def verify_region_robustness(target_seq, region_list, config, prob_results, experiment_file, n_samples=100, eps=1e-6):
+  """
+  Validates the analytical invariance region using statistical sampling and high-fidelity simulation.
+
+  Args:
+      target_seq (tuple): The symbolic sequence to verify.
+      region_list (list): List of (theta_min, theta_max) tuples.
+      config (dict): Configuration dictionary containing design_params.
+      prob_results (dict): Dictionary containing controller and ETM matrices.
+      experiment_file (str): Path to the simulation configuration file.
+      n_samples (int): Number of points to sample within the region.
+      eps (float): Safety margin to mitigate boundary numerical sensitivities.
+  """
+  if not region_list:
+    print("Error: The provided region list is empty.")
+    return
+
+  # Extract discretization parameter
+  sampling_period = config["design_params"]['h']
+  theta_min, theta_max = region_list[0]
+
+  # Contraction of the sampling interval to avoid boundary grazing
+  theta_min_safe = theta_min + eps
+  theta_max_safe = theta_max - eps
+
+  if theta_min_safe >= theta_max_safe:
+    print("Warning: Epsilon margin exceeds region width. Using center point only.")
+    sampled_angles = np.array([(theta_min + theta_max) / 2])
+  else:
+    sampled_angles = np.linspace(theta_min_safe, theta_max_safe, n_samples)
+
+  stats = {"success": 0, "failure": 0}
+  failures = []
+
+  print(f"--- Initiating Robustness Verification (eps={eps}) ---")
+  print(f"Target Sequence: {target_seq}")
+  print(
+      f"Safe Range: [{np.degrees(theta_min_safe):.4f}°, {np.degrees(theta_max_safe):.4f}°]\n")
+
+  for i, theta in enumerate(sampled_angles):
+    # State reconstruction for 2D phase plane
+    x0_sample = np.array([np.cos(theta), np.sin(theta)], dtype=np.float32)
+
+    try:
+      # External call to the C++ simulation model
+      events = recurrence_model_setm(
+          x0_sample, experiment_file, prob_results)
+      inter_event_times = nm.compute_deltas(events)
+
+      # Discretization of continuous time deltas into steps k
+      sim_seq = np.round(
+          np.array(inter_event_times[1:]) / sampling_period).astype(int)
+      obtained_seq = tuple(sim_seq[:len(target_seq)])
+
+      if obtained_seq == target_seq:
+        stats["success"] += 1
+      else:
+        stats["failure"] += 1
+        failures.append({
+            "sample_idx": i,
+            "angle_deg": np.degrees(theta),
+            "got": obtained_seq
+        })
+
+    except Exception as e:
+      stats["failure"] += 1
+      print(f"Execution error at sample {i}: {e}")
+
+  total_effective = len(sampled_angles)
+  accuracy = (stats["success"] / total_effective) * 100
+
+  print("-" * 45)
+  print(f"VERIFICATION COMPLETE")
+  print(f"Reliability: {accuracy:.2f}%")
+  print(f"OK: {stats['success']} | FAIL: {stats['failure']}")
+  print("-" * 45)
+
+  if failures:
+    print("\nAnalysis of Divergences:")
+    for fail in failures[:3]:
+      print(
+          f"Sample {fail['sample_idx']}: θ = {fail['angle_deg']:.6f}° -> Got {fail['got']}")
