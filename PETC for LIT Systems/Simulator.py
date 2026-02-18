@@ -6,6 +6,9 @@ Provides strict I/O handling and native OpenMP parallel processing support.
 Ensures determinism and bypasses Windows CLI limits using binary state transfer.
 """
 
+import matplotlib.pyplot as plt
+import scipy.linalg as la
+import scipy.sparse.linalg as sla
 from fractions import Fraction as PyFraction
 from z3 import Solver, Real, sat, Q
 from scipy.signal import cont2discrete
@@ -24,8 +27,10 @@ _backend = CppSimulator(exe_name="ETCforLinearSystemMain")
 
 class NumpyEncoder(json.JSONEncoder):
   """
-  Custom JSON Encoder to handle NumPy types during serialization.
-  Ensures all matrix types are converted to standard Python lists.
+  A custom JSON encoder for serializing NumPy data types.
+
+  This encoder ensures that NumPy arrays and scalars are converted to standard
+  Python lists and native types (float, int) for JSON compatibility.
   """
 
   def default(self, obj):
@@ -40,7 +45,10 @@ class NumpyEncoder(json.JSONEncoder):
 
 def projective_eps_net(eps):
   """
-  Generates a uniform sampling of the projective space S^1.
+  Generates a uniform sampling of the projective space S^1 (unit circle in 2D).
+
+  This function creates an epsilon-net on the unit circle, useful for covering
+  the state space in homogeneous systems.
 
   Args:
       eps (float): Precision parameter for the epsilon-net.
@@ -56,18 +64,21 @@ def projective_eps_net(eps):
 
 def _prepare_temp_config(config_path, results_dict):
   """
-  Internal helper to merge base config with optimization results
-  and write to a guaranteed closed temporary file.
+  Merges the base configuration with optimization results and writes to a temporary JSON file.
+
+  This function handles the mapping of Greek symbols to ASCII keys expected by the C++ backend
+  and ensures atomic file operations to avoid race conditions.
 
   Args:
       config_path (str): Path to the original experiment JSON.
       results_dict (dict): Dictionary containing controller K and ETM matrices.
+
+  Returns:
+      str: Path to the temporary configuration file.
   """
   with open(config_path, 'r') as f:
     full_data = json.load(f)
 
-  # Map Greek symbols (Ξ, Ψ) to C++ expected keys (Xi, Psi)
-  # This prevents key errors in the backend ConfigLoader
   full_data['results'] = {
       "controller": {
           "K": np.array(results_dict['controller']['K']).tolist()
@@ -78,12 +89,11 @@ def _prepare_temp_config(config_path, results_dict):
       }
   }
 
-  # Use delete=False to manage lifecycle manually and avoid sharing violations
   tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
   try:
     json.dump(full_data, tmp, cls=NumpyEncoder)
     tmp.flush()
-    os.fsync(tmp.fileno())  # Force write to disk
+    os.fsync(tmp.fileno())
     return tmp.name
   finally:
     tmp.close()
@@ -91,14 +101,18 @@ def _prepare_temp_config(config_path, results_dict):
 
 def open_loop(x0, config_path, u_constant=0.0):
   """
-  Performs an Open-Loop simulation using the C++ backend.
+  Executes an open-loop simulation using the high-performance C++ backend.
+
+  This function simulates the system dynamics without feedback control.
 
   Args:
       x0 (list/np.ndarray): Initial state vector.
       config_path (str): Path to the experiment configuration.
       u_constant (float): Constant input for open-loop simulation.
+
+  Returns:
+      tuple: (y, t, u) arrays containing output, time, and input history.
   """
-  # Ensure x0 is a clean copy to prevent mutation
   x0_clean = np.array(x0, copy=True).flatten()
 
   results = _backend.run(
@@ -114,12 +128,18 @@ def open_loop(x0, config_path, u_constant=0.0):
 
 def closed_loop_setm(x0, config_path, results_dict):
   """
-  Performs a Closed-Loop SETM simulation (RK5).
+  Executes a closed-loop simulation with a Static Event-Triggered Mechanism (SETM).
+
+  This function utilizes the C++ backend to simulate the system under event-triggered
+  control using Runge-Kutta integration.
 
   Args:
       x0 (list/np.ndarray): Initial state vector.
       config_path (str): Path to the base JSON.
       results_dict (dict): Optimization results containing K, Xi, and Psi.
+
+  Returns:
+      tuple: (y, t, u, event_times) arrays containing simulation data.
   """
   if results_dict is None:
     raise ValueError("Optimization results are required for closed-loop.")
@@ -145,13 +165,18 @@ def closed_loop_setm(x0, config_path, results_dict):
 
 def recurrence_model_setm(x0, config_path, results_dict):
   """
-  Simulates a single trajectory using the Discrete-Time Recurrence Map.
-  Optimized for high-speed event detection.
+  Simulates a single trajectory using the discrete-time recurrence map.
+
+  This function is optimized for high-speed detection of event times without
+  full state trajectory logging.
 
   Args:
       x0 (list/np.ndarray): Initial state vector.
       config_path (str): Path to the base JSON.
       results_dict (dict): Optimization results containing K, Xi, and Psi.
+
+  Returns:
+      np.ndarray: Array of event timestamps.
   """
   if results_dict is None:
     raise ValueError(
@@ -172,7 +197,6 @@ def recurrence_model_setm(x0, config_path, results_dict):
     if not sim_data:
       return None
 
-    # Return only the event timestamps
     return sim_data['event_times']
   finally:
     if os.path.exists(temp_path):
@@ -181,9 +205,11 @@ def recurrence_model_setm(x0, config_path, results_dict):
 
 def build_symbolic_sequences_parallel(initial_states, config_path, results_dict):
   """
-  Performs massive parallel recurrence mapping using native C++/OpenMP threads.
-  Replaces joblib/multiprocessing for Windows systems.
-  Bypasses CLI character limits using binary temporary files.
+  Performs parallel recurrence mapping using native C++/OpenMP threads.
+
+  This function efficiently computes symbolic sequences for a batch of initial states,
+  leveraging the C++ backend for performance and bypassing CLI limitations via binary
+  data transfer.
 
   Args:
       initial_states (np.ndarray): Array of sampled initial states [N x dim].
@@ -200,12 +226,10 @@ def build_symbolic_sequences_parallel(initial_states, config_path, results_dict)
   temp_path = _prepare_temp_config(config_path, results_dict)
   h = 0.0
 
-  # Extract h for symbolic discretization
   with open(config_path, 'r') as f:
     h = json.load(f)["design_params"]["h"]
 
   try:
-    # Call the C++ backend using native threads and binary data transfer
     all_event_times = _backend.run_parallel_recurrence(
         temp_path, initial_states)
 
@@ -213,7 +237,6 @@ def build_symbolic_sequences_parallel(initial_states, config_path, results_dict)
     for event_times in all_event_times:
       if len(event_times) > 1:
         inter_event_times = np.diff(event_times)
-        # Symbolic discretization: k = round(delta / h)
         k_seq = np.round(inter_event_times / h).astype(int).tolist()
         all_k_seqs.append(k_seq)
       else:
@@ -227,8 +250,10 @@ def build_symbolic_sequences_parallel(initial_states, config_path, results_dict)
 
 def visualize_graph(G, sequence=None, filename="symbolic_model_final.html"):
   """
-  Generates a high-fidelity interactive visualization of the symbolic graph.
-  Includes slide controls and full navigation capabilities.
+  Generates an interactive HTML visualization of the symbolic graph.
+
+  The visualization includes navigation controls, node highlighting for specific
+  sequences, and topological analysis features.
 
   Args:
       G (networkx.DiGraph): The symbolic graph.
@@ -238,7 +263,6 @@ def visualize_graph(G, sequence=None, filename="symbolic_model_final.html"):
   net = Network(notebook=True, directed=True, width="100%",
                 height="100vh", bgcolor="#fdfdfd", cdn_resources="in_line")
 
-  # Topological Analysis (Attractors)
   sccs = list(nx.strongly_connected_components(G))
   attractor_nodes = set()
   for scc in sccs:
@@ -252,7 +276,6 @@ def visualize_graph(G, sequence=None, filename="symbolic_model_final.html"):
     sequence_ids = [node_id_map[node]
                     for node in sequence if node in node_id_map]
 
-  # Node Styling
   for node, node_id in node_id_map.items():
     is_seq = sequence and node in sequence
     is_attr = node in attractor_nodes
@@ -287,7 +310,6 @@ def visualize_graph(G, sequence=None, filename="symbolic_model_final.html"):
         borderWidth=border_width
     )
 
-  # Edge Styling
   for u, v, data in G.edges(data=True):
     u_id, v_id = node_id_map[u], node_id_map[v]
     weight = data.get("weight")
@@ -320,7 +342,6 @@ def visualize_graph(G, sequence=None, filename="symbolic_model_final.html"):
     net.add_edge(u_id, v_id, label=label_text, color=color,
                  width=width, font=font, dashes=dashes, arrows="to")
 
-  # Physics and Interaction Settings
   options = {
       "nodes": {"font": {"strokeWidth": 2, "strokeColor": "#ffffff"}},
       "edges": {
@@ -347,7 +368,6 @@ def visualize_graph(G, sequence=None, filename="symbolic_model_final.html"):
   net.set_options(f"var options = {json.dumps(options)}")
   net.save_graph(filename)
 
-  # Inject Custom UI
   with open(filename, "r", encoding="utf-8") as f:
     html_content = f.read()
 
@@ -478,22 +498,22 @@ def visualize_graph(G, sequence=None, filename="symbolic_model_final.html"):
 
 class SequenceReconstructor:
   """
-  Reconstrutor de estados iniciais (x0) compatíveis com uma sequência de eventos 
-  pré-definida em sistemas de controle baseados em eventos (ETC/SETM).
+  Reconstructs initial states (x0) compatible with a predefined event sequence in ETC/SETM systems.
 
-  Utiliza Z3 para resolver as restrições quadráticas de disparo.
+  This class uses the Z3 theorem prover to solve quadratic triggering constraints and find a valid
+  initial state for a given symbolic sequence.
   """
 
   def __init__(self, A_c, B_c, K, Xi, Psi, h, iet_max):
     """
-    Inicializa o reconstrutor e pré-calcula as matrizes de transição e gatilho.
+    Initializes the reconstructor and pre-computes transition and triggering matrices.
 
     Args:
-        A_c, B_c: Matrizes do sistema contínuo.
-        K: Ganho do controlador.
-        Xi, Psi: Matrizes de peso do mecanismo de gatilho.
-        h: Passo de discretização.
-        iet_max: Tempo máximo entre eventos.
+        A_c, B_c: Continuous system matrices.
+        K: Controller gain.
+        Xi, Psi: Triggering mechanism weight matrices.
+        h: Discretization step.
+        iet_max: Maximum inter-event time.
     """
     self.nx = A_c.shape[0]
     self.h = h
@@ -527,13 +547,13 @@ class SequenceReconstructor:
 
   def find_compatible_state(self, sequence):
     """
-    Busca um vetor x0 não-nulo que gere exatamente a sequência de eventos fornecida.
+    Finds a non-zero initial state vector x0 that generates the exact provided event sequence.
 
     Args:
-        sequence (list[int]): Lista de intervalos entre eventos (em passos h).
+        sequence (list[int]): List of inter-event intervals (in steps h).
 
     Returns:
-        np.array: Vetor de estado x0 válido, ou None se a sequência for impossível.
+        np.array: Valid state vector x0, or None if the sequence is impossible.
     """
     solver = Solver()
     x0 = [Real(f'x0_{i}') for i in range(self.nx)]
@@ -573,20 +593,22 @@ class SequenceReconstructor:
 
 def build_symbolic_exactly_graph(target_l, K_set, h, A, B, K, Xi, Psi, iet_max):
   """
-  Constrói o grafo simbólico crescendo progressivamente o tamanho das palavras.
-  Complexidade reduzida drasticamente ao descartar ramos inviáveis cedo.
+  Constructs the symbolic graph by progressively increasing the sequence length.
+
+  This function reduces computational complexity by pruning infeasible branches early
+  in the construction process.
   """
-  print(f"=== [Init] Pré-calculando dinâmicas (Z3 Backend) ===")
+  print(f"=== [Init] Pre-calculating dynamics (Z3 Backend) ===")
   reconstructor = SequenceReconstructor(A, B, K, Xi, Psi, h, iet_max)
   valid_sequences = []
-  print(f"--- Camada 1 ---")
+  print(f"--- Layer 1 ---")
   for k in K_set:
     seq = (k,)
     if reconstructor.find_compatible_state(seq) is not None:
       valid_sequences.append(seq)
 
   for length in range(2, target_l + 1):
-    print(f"--- Camada {length} ---")
+    print(f"--- Layer {length} ---")
     next_valid_sequences = []
     candidates_count = len(valid_sequences) * len(K_set)
 
@@ -599,10 +621,10 @@ def build_symbolic_exactly_graph(target_l, K_set, h, A, B, K, Xi, Psi, iet_max):
 
     dropped = candidates_count - len(next_valid_sequences)
     print(
-        f"   Candidatos: {candidates_count} | Válidos: {len(next_valid_sequences)} | Podados: {dropped}")
+        f"   Candidates: {candidates_count} | Valid: {len(next_valid_sequences)} | Pruned: {dropped}")
 
     if not next_valid_sequences:
-      print("AVISO: Nenhuma sequência válida encontrada neste comprimento!")
+      print("WARNING: No valid sequences found at this length!")
       break
 
     valid_sequences = next_valid_sequences
@@ -613,7 +635,7 @@ def build_symbolic_exactly_graph(target_l, K_set, h, A, B, K, Xi, Psi, iet_max):
   G.add_nodes_from(feasible_nodes)
 
   print(
-      f"=== [Edges] Gerando arestas (Extensão para tam {target_l + 1}) ===")
+      f"=== [Edges] Generating edges (Extension to size {target_l + 1}) ===")
   count_edges = 0
 
   for node_a in feasible_nodes:
@@ -633,17 +655,19 @@ def build_symbolic_exactly_graph(target_l, K_set, h, A, B, K, Xi, Psi, iet_max):
           )
           count_edges += 1
 
-  print("\n=== Relatório Final ===")
-  print(f"Nós Finais: {len(feasible_nodes)}")
-  print(f"Arestas:    {count_edges}")
+  print("\n=== Final Report ===")
+  print(f"Final Nodes: {len(feasible_nodes)}")
+  print(f"Edges:       {count_edges}")
 
   return G
 
 
 class SequenceRegionAnalyzer:
   """
-  Analyzes and determines the analytical angular regions (cones) in the 
-  phase plane that generate a specific symbolic sequence for linear homogeneous systems.
+  Analyzes and determines the analytical angular regions (cones) in the phase plane.
+
+  This class identifies the set of initial angles that generate a specific symbolic
+  sequence for linear homogeneous systems.
   """
 
   def __init__(self, reconstructor):
@@ -682,7 +706,7 @@ class SequenceRegionAnalyzer:
 
   def find_region(self, sequence):
     """
-    Identifies the valid [theta_min, theta_max] intervals for a given symbolic sequence.
+    Identifies the valid angular intervals [theta_min, theta_max] for a given symbolic sequence.
 
     Args:
         sequence (tuple): The target sequence of inter-event steps (k).
@@ -711,7 +735,6 @@ class SequenceRegionAnalyzer:
     return final_intervals
 
   def _intersect(self, intervals_a, intervals_b):
-    """Performs intersection of multiple angular interval sets."""
     res = []
     for start_a, end_a in intervals_a:
       for start_b, end_b in intervals_b:
@@ -726,6 +749,9 @@ def verify_region_robustness(target_seq, region_list, config, prob_results, expe
   """
   Validates the analytical invariance region using statistical sampling and high-fidelity simulation.
 
+  This function checks if sampled points within the calculated region produce the expected
+  symbolic sequence.
+
   Args:
       target_seq (tuple): The symbolic sequence to verify.
       region_list (list): List of (theta_min, theta_max) tuples.
@@ -739,11 +765,9 @@ def verify_region_robustness(target_seq, region_list, config, prob_results, expe
     print("Error: The provided region list is empty.")
     return
 
-  # Extract discretization parameter
   sampling_period = config["design_params"]['h']
   theta_min, theta_max = region_list[0]
 
-  # Contraction of the sampling interval to avoid boundary grazing
   theta_min_safe = theta_min + eps
   theta_max_safe = theta_max - eps
 
@@ -762,16 +786,13 @@ def verify_region_robustness(target_seq, region_list, config, prob_results, expe
       f"Safe Range: [{np.degrees(theta_min_safe):.4f}°, {np.degrees(theta_max_safe):.4f}°]\n")
 
   for i, theta in enumerate(sampled_angles):
-    # State reconstruction for 2D phase plane
     x0_sample = np.array([np.cos(theta), np.sin(theta)], dtype=np.float32)
 
     try:
-      # External call to the C++ simulation model
       events = recurrence_model_setm(
           x0_sample, experiment_file, prob_results)
       inter_event_times = nm.compute_deltas(events)
 
-      # Discretization of continuous time deltas into steps k
       sim_seq = np.round(
           np.array(inter_event_times[1:]) / sampling_period).astype(int)
       obtained_seq = tuple(sim_seq[:len(target_seq)])
@@ -804,3 +825,303 @@ def verify_region_robustness(target_seq, region_list, config, prob_results, expe
     for fail in failures[:3]:
       print(
           f"Sample {fail['sample_idx']}: θ = {fail['angle_deg']:.6f}° -> Got {fail['got']}")
+
+
+def compute_analytical_metrics(G, h, reconstructor):
+  """
+  Generates a comprehensive analytical report of ETC traffic metrics.
+
+  This function calculates global limits, recurrence limits, behavioral entropy,
+  and performance metrics based on the symbolic graph structure.
+  """
+
+  if G.number_of_nodes() == 0:
+    print("Error: Empty graph.")
+    return {}
+
+  print(f"\n{'='*60}")
+  print(f"FULL ANALYTICAL TRAFFIC REPORT (Gleizer & Mazo Jr., 2023)")
+  print(f"{'='*60}")
+  print(
+      f"Graph Structure: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
+
+  def get_k(node):
+    try:
+      val = node[-1] if isinstance(node, (tuple, list)) else node
+      return int(val)
+    except:
+      return int(node)
+
+  def fmt(val, precision=5):
+    return f"{val:.{precision}f}" if val is not None else "N/A"
+
+  def get_matrix_from_cache(cache, k):
+    try:
+      if isinstance(cache, dict):
+        return cache.get(k)
+      elif isinstance(cache, (list, tuple, np.ndarray)):
+        if 0 <= k < len(cache):
+          return cache[k]
+        if k < len(cache):
+          return cache[k]
+      return None
+    except:
+      return None
+
+  inf_val = None
+  sup_val = None
+  inf_liminf = None
+  sup_limsup = None
+  entropy = None
+  is_chaotic = False
+  complexity_class = "Unknown"
+  inf_lim_avg = None
+  sup_lim_avg = None
+  rob_inf_lim_avg = None
+  rob_sup_lim_avg = None
+  num_stable = 0
+  num_unstable = 0
+  non_trivial_sccs = 0
+  max_scc_size = 0
+  cycle_metrics = []
+  savings_pct = None
+
+  try:
+    h_scalar = float(h)
+  except:
+    h_scalar = 0.005
+
+  # --- GLOBAL LIMITS ---
+  try:
+    all_ks = [get_k(n) for n in G.nodes()]
+    if all_ks:
+      inf_val = min(all_ks) * h_scalar
+      sup_val = max(all_ks) * h_scalar
+  except Exception as e:
+    print(f"Global limits error: {e}")
+
+  # --- RECURRENCE LIMITS (SCCs) ---
+  try:
+    sccs = list(nx.strongly_connected_components(G))
+    recurrent_ks = []
+
+    for scc in sccs:
+      if len(scc) > 1 or (len(scc) == 1 and G.has_edge(list(scc)[0], list(scc)[0])):
+        non_trivial_sccs += 1
+        max_scc_size = max(max_scc_size, len(scc))
+        for n in scc:
+          recurrent_ks.append(get_k(n))
+
+    if recurrent_ks:
+      inf_liminf = min(recurrent_ks) * h_scalar
+      sup_limsup = max(recurrent_ks) * h_scalar
+  except Exception as e:
+    print(f"SCC error: {e}")
+
+  # --- BEHAVIORAL ENTROPY ---
+  try:
+    if G.number_of_nodes() < 200:
+      try:
+        adj = nx.adjacency_matrix(G).todense()
+      except:
+        adj = nx.adjacency_matrix(G).toarray()
+      vals = la.eigvals(adj)
+      rho = float(max(abs(vals)))
+    else:
+      try:
+        adj = nx.adjacency_matrix(G).astype(float)
+      except:
+        adj = nx.adjacency_matrix(G).asfptype()
+      vals = sla.eigs(adj, k=1, which='LM', return_eigenvectors=False)
+      rho = float(abs(vals[0]))
+
+    entropy = np.log2(rho) if rho > 1.0 else 0.0
+    is_chaotic = entropy > 1e-6
+
+    complexity_class = "CHAOTIC" if is_chaotic else "ORDERLY"
+    if is_chaotic and max_scc_size > 10:
+      complexity_class += " (Complex Attractor)"
+
+  except Exception as e:
+    print(f"Entropy warning: {e}")
+
+  # --- CYCLE ANALYSIS & ROBUST METRICS ---
+  try:
+    dim = 2
+    if hasattr(reconstructor, 'M_cache') and reconstructor.M_cache:
+      cache = reconstructor.M_cache
+      sample_matrix = None
+      if isinstance(cache, dict):
+        if cache:
+          sample_matrix = next(iter(cache.values()))
+      elif isinstance(cache, (list, tuple)):
+        if len(cache) > 0:
+          sample_matrix = cache[0] if cache[0] is not None else (
+              cache[1] if len(cache) > 1 else None)
+
+      if sample_matrix is not None:
+        dim = sample_matrix.shape[0]
+
+    cycles = list(nx.simple_cycles(G))
+
+    for cycle in cycles:
+      ks = [get_k(n) for n in cycle]
+      if not ks:
+        continue
+
+      total_time = sum(ks) * h_scalar
+      mean_iet = float(total_time / len(ks))
+
+      M_sigma = np.eye(dim)
+
+      for k_val in ks:
+        k_int = int(k_val)
+        M_k = get_matrix_from_cache(reconstructor.M_cache, k_int)
+
+        if M_k is not None:
+          M_sigma = M_k @ M_sigma
+        else:
+          pass
+
+      eigvals = np.linalg.eigvals(M_sigma)
+      spec_rad = float(max(np.abs(eigvals)))
+      is_stable = spec_rad < (1.0 - 1e-9)
+
+      cycle_metrics.append({
+          "mean": mean_iet,
+          "stable": is_stable
+      })
+
+    if cycle_metrics:
+      all_means = [c["mean"] for c in cycle_metrics]
+      inf_lim_avg = min(all_means)
+      sup_lim_avg = max(all_means)
+
+      if inf_lim_avg > 1e-9:
+        savings_pct = (1.0 - (h_scalar / inf_lim_avg)) * 100.0
+
+      stable_means = [c["mean"] for c in cycle_metrics if c["stable"]]
+      if stable_means:
+        rob_inf_lim_avg = min(stable_means)
+        rob_sup_lim_avg = max(stable_means)
+
+      num_stable = len(stable_means)
+      num_unstable = len(cycle_metrics) - num_stable
+
+  except Exception as e:
+    print(f"Cycle analysis failed: {e}")
+
+  # --- REPORT PRINTING ---
+  print(f"\n--- 1. Global & Limit Metrics ---")
+  print(f"Inf (MIST):       {fmt(inf_val)} s")
+  print(f"Sup (MaxIST):     {fmt(sup_val)} s")
+  print(f"InfLimInf:        {fmt(inf_liminf)} s")
+  print(f"SupLimSup:        {fmt(sup_limsup)} s")
+
+  print(f"\n--- 2. Complexity & Chaos ---")
+  print(f"Behavioral Entropy: {fmt(entropy, 4)} bits")
+  print(f"Classification:     {complexity_class}")
+  print(f"Non-Trivial SCCs:   {non_trivial_sccs}")
+
+  print(f"\n--- 3. Performance Metrics (Average IET) ---")
+  print(f"{'Metric':<20} | {'Value':<12} | {'Description'}")
+  print("-" * 60)
+  print(f"{'InfLimAvg':<20} | {fmt(inf_lim_avg):<12} | Worst-case (Theoretical)")
+  print(f"{'SupLimAvg':<20} | {fmt(sup_lim_avg):<12} | Best-case (Theoretical)")
+
+  if savings_pct is not None:
+    savings_str = f"{savings_pct:.2f}%"
+    print(f"{'Min Savings':<20} | {savings_str:<12} | vs. Periodic (h={h_scalar}s)")
+
+  print("-" * 60)
+
+  print(f"\n--- 4. Robustness Analysis (Stability) ---")
+  print(f"Total Cycles Found: {len(cycle_metrics)}")
+  print(f"  - Stable:         {num_stable}")
+  print(f"  - Unstable:       {num_unstable}")
+
+  if rob_inf_lim_avg is not None:
+    print(f"\nROBUST InfLimAvg:   {fmt(rob_inf_lim_avg)} s")
+    print("Note: Guaranteed performance on physically observable orbits.")
+  else:
+    status = "Undefined"
+    if not cycle_metrics:
+      status += " (No cycles found)"
+    elif num_stable == 0:
+      status += " (All cycles unstable/chaotic)"
+    print(f"\nROBUST Metric:      {status}")
+
+  print(f"{'='*60}\n")
+
+  return {
+      "Inf": inf_val,
+      "Sup": sup_val,
+      "InfLimInf": inf_liminf,
+      "InfLimAvg": inf_lim_avg,
+      "SupLimAvg": sup_lim_avg,
+      "Entropy": entropy,
+      "IsChaotic": is_chaotic,
+      "RobInfLimAvg": rob_inf_lim_avg,
+      "SavingsPct": savings_pct
+  }
+
+
+def plot_cycle_distribution(G, h):
+  """
+  Plots a histogram of average inter-event times for all simple cycles in the symbolic graph.
+
+  This visualization displays the density of periodic traffic patterns.
+  """
+  try:
+    cycles = list(nx.simple_cycles(G))
+
+    if not cycles:
+      print("No cycles found in the graph.")
+      return
+
+    cycle_means = []
+    for cycle in cycles:
+      total_time = 0
+      for node in cycle:
+        try:
+          k = node[-1] if isinstance(node, (tuple, list)) else node
+        except:
+          k = node
+        total_time += float(k) * h
+
+      mean_val = total_time / len(cycle)
+      cycle_means.append(mean_val)
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    counts, bins, patches = ax.hist(
+        cycle_means,
+        bins=30,
+        color='#003366',
+        edgecolor='white',
+        alpha=0.7,
+        label='Cycle Means'
+    )
+
+    min_mean = min(cycle_means)
+    max_mean = max(cycle_means)
+
+    ax.axvline(min_mean, color='#B22222', linestyle='--', linewidth=2,
+               label=f'InfLimAvg (Worst Case): {min_mean:.5f}s')
+    ax.axvline(max_mean, color='#228B22', linestyle='--', linewidth=2,
+               label=f'SupLimAvg (Best Case): {max_mean:.5f}s')
+
+    ax.set_xlabel('Average Inter-Event Time [s]', fontsize=14)
+    ax.set_ylabel('Count of Simple Cycles', fontsize=14)
+    ax.set_title(
+        f'Distribution of Periodic Traffic Patterns (N={len(cycles)})', fontsize=16)
+    ax.legend(fontsize=12)
+    ax.grid(True, linestyle=':', alpha=0.6)
+
+    plt.tight_layout()
+    plt.show()
+
+    print(f"Total Simple Cycles Found: {len(cycles)}")
+
+  except Exception as e:
+    print(f"Error plotting cycle distribution: {e}")
