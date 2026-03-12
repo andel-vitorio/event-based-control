@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QTableWidgetItem, QHeaderView, QAbstractItemView
 )
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QBrush
+from PySide6.QtGui import QColor, QBrush, QFont
 
 from ui.widgets.sidebar import SidebarWidget
 
@@ -405,6 +405,26 @@ class SavingsAnalysisTab(QWidget):
 
     bg_color = '#F8F9FA' if theme_name == 'light' else '#171717'
     self.plot_widget.setBackground(bg_color)
+
+    label_style = {'color': fg_color, 'font-size': '15pt'}  # Eixos (X e Y)
+    tick_font = QFont()
+    tick_font.setPixelSize(16)  # Números dos eixos
+
+    for plot in [self.plot_widget]:
+      plot.setBackground(bg_color)
+      axis_pen = pg.mkPen(color=fg_color)
+
+      for axis_name in ['left', 'bottom']:
+        axis = plot.getAxis(axis_name)
+        axis.setPen(axis_pen)
+        axis.setTextPen(axis_pen)
+        axis.setLabel(**label_style)
+        axis.setTickFont(tick_font)
+
+      if plot.plotItem.titleLabel.text:
+        plot.plotItem.setTitle(
+            plot.plotItem.titleLabel.text, color=fg_color, size='18px'
+        )
 
     axis_pen = pg.mkPen(color=fg_color)
     for axis_name in ['left', 'bottom']:

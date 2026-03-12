@@ -10,6 +10,10 @@ from core.data_loader import scan_traffic_directory
 
 
 class FileChipWidget(QWidget):
+  """
+  Custom item widget designed to display file metadata as categorized chips.
+  Includes explicit layout constraints and scaled fonts for presentation visibility.
+  """
   stateChanged = Signal(str, bool)
 
   def __init__(self, file_data: dict):
@@ -44,14 +48,18 @@ class FileChipWidget(QWidget):
     layout.addStretch()
 
   def _create_chip(self, text: str, rgb_color: str) -> QLabel:
+    """
+    Generates a styled label chip.
+    Padding and font-size are scaled up for 1080p presentation displays.
+    """
     label = QLabel(text)
     label.setStyleSheet(f"""
             background-color: rgba({rgb_color}, 0.15);
             color: rgb({rgb_color});
             border: 1px solid rgba({rgb_color}, 0.5);
             border-radius: 6px;
-            padding: 3px 8px;
-            font-size: 11px;
+            padding: 4px 10px;
+            font-size: 14px;
             font-family: "Poppins";
             font-weight: bold;
         """)
@@ -71,7 +79,7 @@ class SidebarWidget(QWidget):
   """
 
   selectionChanged = Signal(list)
-  directoryChanged = Signal(str)  # Novo sinal para sincronização entre abas
+  directoryChanged = Signal(str)
 
   def __init__(self):
     super().__init__()
@@ -106,7 +114,7 @@ class SidebarWidget(QWidget):
     layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
     title_font = QFont()
-    title_font.setPointSize(16)
+    title_font.setPointSize(22)
     title_font.setBold(True)
 
     self.sidebar_title_label = QLabel("Controls")

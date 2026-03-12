@@ -25,8 +25,8 @@ def main() -> None:
     for f in list(fonts_dir.glob("*.ttf")) + list(fonts_dir.glob("*.otf")):
       QFontDatabase.addApplicationFont(str(f))
 
-  default_font = QFont("Poppins", 10) if "Poppins" in QFontDatabase.families(
-  ) else QFont("Segoe UI", 10)
+  default_font = QFont("Poppins", 13) if "Poppins" in QFontDatabase.families(
+  ) else QFont("Segoe UI", 13)
   app.setFont(default_font)
 
   window = MainWindow()

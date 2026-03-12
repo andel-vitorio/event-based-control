@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QTableWidgetItem, QHeaderView, QAbstractItemView
 )
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QBrush
+from PySide6.QtGui import QColor, QBrush, QFont
 
 from ui.widgets.sidebar import SidebarWidget
 
@@ -29,7 +29,7 @@ class BoundsAnalysisTab(QWidget):
 
   def _setup_ui(self) -> None:
     """
-    Constructs the internal layout containing the sidebar, chart selectors, 
+    Constructs the internal layout containing the sidebar, chart selectors,
     multi-line graph, independent table filters, and comparative metrics table.
     """
     self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -413,6 +413,35 @@ class BoundsAnalysisTab(QWidget):
 
     bg_color = '#F8F9FA' if theme_name == 'light' else '#171717'
     legend_bg = '#FFFFFF' if theme_name == 'light' else '#242424'
+
+    # Definição das fontes para o pyqtgraph
+    label_style = {'color': fg_color, 'font-size': '15pt'}  # Eixos (X e Y)
+    tick_font = QFont()
+    tick_font.setPixelSize(16)  # Números dos eixos
+
+    for plot in [self.plot_widget]:
+      plot.setBackground(bg_color)
+      axis_pen = pg.mkPen(color=fg_color)
+
+      for axis_name in ['left', 'bottom']:
+        axis = plot.getAxis(axis_name)
+        axis.setPen(axis_pen)
+        axis.setTextPen(axis_pen)
+        axis.setLabel(**label_style)
+        axis.setTickFont(tick_font)
+
+      if plot.plotItem.titleLabel.text:
+        plot.plotItem.setTitle(
+            plot.plotItem.titleLabel.text, color=fg_color, size='18px'
+        )
+
+    if hasattr(self, 'legend') and self.legend:
+      brush_color = QColor(legend_bg)
+      brush_color.setAlpha(255)
+      self.legend.setBrush(QBrush(brush_color))
+
+      for sample, label in self.legend.items:
+        label.setText(label.text, color=fg_color, size='14px')
 
     self.plot_widget.setBackground(bg_color)
 

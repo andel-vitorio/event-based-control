@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QTableWidgetItem, QHeaderView, QAbstractItemView
 )
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QBrush
+from PySide6.QtGui import QColor, QBrush, QFont
 
 from ui.widgets.sidebar import SidebarWidget
 
@@ -302,15 +302,15 @@ class CycleAnalysisTab(QWidget):
 
         # Aplica o mesmo filtro dos gráficos: remove "valores lixo" (sigma/eps_tr <= 0)
         if 'eps_tr' in df.columns:
-            df['eps_tr'] = pd.to_numeric(df['eps_tr'], errors='coerce')
-            df = df[df['eps_tr'] > 1e-6]
+          df['eps_tr'] = pd.to_numeric(df['eps_tr'], errors='coerce')
+          df = df[df['eps_tr'] > 1e-6]
         elif 'sigma' in df.columns:
-            df['sigma'] = pd.to_numeric(df['sigma'], errors='coerce')
-            df = df[df['sigma'] > 1e-6]
+          df['sigma'] = pd.to_numeric(df['sigma'], errors='coerce')
+          df = df[df['sigma'] > 1e-6]
 
         # Se o arquivo ficar vazio após o filtro, ignora
         if df.empty:
-            continue
+          continue
 
         kmax_match = re.search(r'kmax(\d+)', filename, re.IGNORECASE)
         kmax_val = kmax_match.group(1) if kmax_match else "N/A"
@@ -437,6 +437,34 @@ class CycleAnalysisTab(QWidget):
 
     bg_color = '#F8F9FA' if theme_name == 'light' else '#171717'
     legend_bg = '#FFFFFF' if theme_name == 'light' else '#242424'
+
+    label_style = {'color': fg_color, 'font-size': '15pt'}  # Eixos (X e Y)
+    tick_font = QFont()
+    tick_font.setPixelSize(16)  # Números dos eixos
+
+    for plot in [self.plot_widget]:
+      plot.setBackground(bg_color)
+      axis_pen = pg.mkPen(color=fg_color)
+
+      for axis_name in ['left', 'bottom']:
+        axis = plot.getAxis(axis_name)
+        axis.setPen(axis_pen)
+        axis.setTextPen(axis_pen)
+        axis.setLabel(**label_style)
+        axis.setTickFont(tick_font)
+
+      if plot.plotItem.titleLabel.text:
+        plot.plotItem.setTitle(
+            plot.plotItem.titleLabel.text, color=fg_color, size='18px'
+        )
+
+    if hasattr(self, 'legend') and self.legend:
+      brush_color = QColor(legend_bg)
+      brush_color.setAlpha(255)
+      self.legend.setBrush(QBrush(brush_color))
+
+      for sample, label in self.legend.items:
+        label.setText(label.text, color=fg_color, size='14px')
 
     self.plot_widget.setBackground(bg_color)
 

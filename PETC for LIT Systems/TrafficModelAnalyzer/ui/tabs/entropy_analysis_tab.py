@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QTableWidgetItem, QHeaderView, QAbstractItemView
 )
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QBrush
+from PySide6.QtGui import QColor, QBrush, QFont
 
 from ui.widgets.sidebar import SidebarWidget
 
@@ -299,7 +299,7 @@ class EntropyAnalysisTab(QWidget):
     is_log_scale = False
     if 'eps_tr' in df.columns:
       x_col = 'eps_tr'
-      y_label = 'log10(eps_tr) (Parameter)'
+      y_label = 'log(&epsilon;<sub>tr</sub>)'
       is_log_scale = True
     elif 'sigma' in df.columns:
       x_col = 'sigma'
@@ -348,6 +348,13 @@ class EntropyAnalysisTab(QWidget):
     y_step = max(1, len(params) // 15)
     y_ticks = [(i + 0.5, f"{val:.4g}")
                for i, val in enumerate(params) if i % y_step == 0]
+
+    if is_log_scale:
+      y_ticks = [(i + 0.5, f"{val:.2f}")
+                 for i, val in enumerate(params) if i % y_step == 0]
+    else:
+      y_ticks = [(i + 0.5, f"{val:.4g}")
+                 for i, val in enumerate(params) if i % y_step == 0]
 
     self.plot_heatmap.getAxis('bottom').setTicks([x_ticks])
     self.plot_heatmap.getAxis('left').setTicks([y_ticks])
@@ -485,6 +492,26 @@ class EntropyAnalysisTab(QWidget):
           f"color: {fg_color};")
 
     bg_color = '#F8F9FA' if theme_name == 'light' else '#171717'
+
+    label_style = {'color': fg_color, 'font-size': '15pt'}  # Eixos (X e Y)
+    tick_font = QFont()
+    tick_font.setPixelSize(16)  # Números dos eixos
+
+    for plot in [self.plot_line, self.plot_heatmap]:
+      plot.setBackground(bg_color)
+      axis_pen = pg.mkPen(color=fg_color)
+
+      for axis_name in ['left', 'bottom']:
+        axis = plot.getAxis(axis_name)
+        axis.setPen(axis_pen)
+        axis.setTextPen(axis_pen)
+        axis.setLabel(**label_style)
+        axis.setTickFont(tick_font)
+
+      if plot.plotItem.titleLabel.text:
+        plot.plotItem.setTitle(
+            plot.plotItem.titleLabel.text, color=fg_color, size='18px'
+        )
 
     for plot in [self.plot_line, self.plot_heatmap]:
       plot.setBackground(bg_color)
