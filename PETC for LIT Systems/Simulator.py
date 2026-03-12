@@ -17,6 +17,7 @@ from pyvis.network import Network
 import numpy as np
 import json
 import os
+import csv
 import tempfile
 from Utils.CppInterface import CppSimulator
 import Utils.Numeric as nm
@@ -591,24 +592,27 @@ class SequenceReconstructor:
       return None
 
 
-def build_symbolic_exactly_graph(target_l, K_set, h, A, B, K, Xi, Psi, iet_max):
+def build_symbolic_exactly_graph(target_l, K_set, h, A, B, K, Xi, Psi, iet_max, verbose=True):
   """
   Constructs the symbolic graph by progressively increasing the sequence length.
 
   This function reduces computational complexity by pruning infeasible branches early
   in the construction process.
   """
-  print(f"=== [Init] Pre-calculating dynamics (Z3 Backend) ===")
+  if verbose:
+    print(f"=== [Init] Pre-calculating dynamics (Z3 Backend) ===")
   reconstructor = SequenceReconstructor(A, B, K, Xi, Psi, h, iet_max)
   valid_sequences = []
-  print(f"--- Layer 1 ---")
+  if verbose:
+    print(f"--- Layer 1 ---")
   for k in K_set:
     seq = (k,)
     if reconstructor.find_compatible_state(seq) is not None:
       valid_sequences.append(seq)
 
   for length in range(2, target_l + 1):
-    print(f"--- Layer {length} ---")
+    if verbose:
+      print(f"--- Layer {length} ---")
     next_valid_sequences = []
     candidates_count = len(valid_sequences) * len(K_set)
 
@@ -620,11 +624,13 @@ def build_symbolic_exactly_graph(target_l, K_set, h, A, B, K, Xi, Psi, iet_max):
           next_valid_sequences.append(candidate)
 
     dropped = candidates_count - len(next_valid_sequences)
-    print(
-        f"   Candidates: {candidates_count} | Valid: {len(next_valid_sequences)} | Pruned: {dropped}")
+    if verbose:
+      print(
+          f"   Candidates: {candidates_count} | Valid: {len(next_valid_sequences)} | Pruned: {dropped}")
 
     if not next_valid_sequences:
-      print("WARNING: No valid sequences found at this length!")
+      if verbose:
+        print("WARNING: No valid sequences found at this length!")
       break
 
     valid_sequences = next_valid_sequences
@@ -634,8 +640,9 @@ def build_symbolic_exactly_graph(target_l, K_set, h, A, B, K, Xi, Psi, iet_max):
   G = nx.DiGraph()
   G.add_nodes_from(feasible_nodes)
 
-  print(
-      f"=== [Edges] Generating edges (Extension to size {target_l + 1}) ===")
+  if verbose:
+    print(
+        f"=== [Edges] Generating edges (Extension to size {target_l + 1}) ===")
   count_edges = 0
 
   for node_a in feasible_nodes:
@@ -655,9 +662,10 @@ def build_symbolic_exactly_graph(target_l, K_set, h, A, B, K, Xi, Psi, iet_max):
           )
           count_edges += 1
 
-  print("\n=== Final Report ===")
-  print(f"Final Nodes: {len(feasible_nodes)}")
-  print(f"Edges:       {count_edges}")
+  if verbose:
+    print("\n=== Final Report ===")
+    print(f"Final Nodes: {len(feasible_nodes)}")
+    print(f"Edges:       {count_edges}")
 
   return G
 
@@ -827,7 +835,7 @@ def verify_region_robustness(target_seq, region_list, config, prob_results, expe
           f"Sample {fail['sample_idx']}: θ = {fail['angle_deg']:.6f}° -> Got {fail['got']}")
 
 
-def compute_analytical_metrics(G, h, reconstructor):
+def compute_analytical_metrics(G, h, reconstructor, verbose=True):
   """
   Generates a comprehensive analytical report of ETC traffic metrics.
 
@@ -839,11 +847,12 @@ def compute_analytical_metrics(G, h, reconstructor):
     print("Error: Empty graph.")
     return {}
 
-  print(f"\n{'='*60}")
-  print(f"FULL ANALYTICAL TRAFFIC REPORT (Gleizer & Mazo Jr., 2023)")
-  print(f"{'='*60}")
-  print(
-      f"Graph Structure: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
+  if verbose:
+    print(f"\n{'='*60}")
+    print(f"FULL ANALYTICAL TRAFFIC REPORT (Gleizer & Mazo Jr., 2023)")
+    print(f"{'='*60}")
+    print(
+        f"Graph Structure: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
 
   def get_k(node):
     try:
@@ -885,6 +894,7 @@ def compute_analytical_metrics(G, h, reconstructor):
   max_scc_size = 0
   cycle_metrics = []
   savings_pct = None
+  robustness_status = "Undefined"
 
   try:
     h_scalar = float(h)
@@ -1011,57 +1021,69 @@ def compute_analytical_metrics(G, h, reconstructor):
   except Exception as e:
     print(f"Cycle analysis failed: {e}")
 
-  # --- REPORT PRINTING ---
-  print(f"\n--- 1. Global & Limit Metrics ---")
-  print(f"Inf (MIST):       {fmt(inf_val)} s")
-  print(f"Sup (MaxIST):     {fmt(sup_val)} s")
-  print(f"InfLimInf:        {fmt(inf_liminf)} s")
-  print(f"SupLimSup:        {fmt(sup_limsup)} s")
-
-  print(f"\n--- 2. Complexity & Chaos ---")
-  print(f"Behavioral Entropy: {fmt(entropy, 4)} bits")
-  print(f"Classification:     {complexity_class}")
-  print(f"Non-Trivial SCCs:   {non_trivial_sccs}")
-
-  print(f"\n--- 3. Performance Metrics (Average IET) ---")
-  print(f"{'Metric':<20} | {'Value':<12} | {'Description'}")
-  print("-" * 60)
-  print(f"{'InfLimAvg':<20} | {fmt(inf_lim_avg):<12} | Worst-case (Theoretical)")
-  print(f"{'SupLimAvg':<20} | {fmt(sup_lim_avg):<12} | Best-case (Theoretical)")
-
-  if savings_pct is not None:
-    savings_str = f"{savings_pct:.2f}%"
-    print(f"{'Min Savings':<20} | {savings_str:<12} | vs. Periodic (h={h_scalar}s)")
-
-  print("-" * 60)
-
-  print(f"\n--- 4. Robustness Analysis (Stability) ---")
-  print(f"Total Cycles Found: {len(cycle_metrics)}")
-  print(f"  - Stable:         {num_stable}")
-  print(f"  - Unstable:       {num_unstable}")
-
+  # Determine robustness status
   if rob_inf_lim_avg is not None:
-    print(f"\nROBUST InfLimAvg:   {fmt(rob_inf_lim_avg)} s")
-    print("Note: Guaranteed performance on physically observable orbits.")
-  else:
-    status = "Undefined"
-    if not cycle_metrics:
-      status += " (No cycles found)"
-    elif num_stable == 0:
-      status += " (All cycles unstable/chaotic)"
-    print(f"\nROBUST Metric:      {status}")
+    robustness_status = "Guaranteed"
+  elif not cycle_metrics:
+    robustness_status = "Undefined (No cycles found)"
+  elif num_stable == 0:
+    robustness_status = "Undefined (All cycles unstable/chaotic)"
 
-  print(f"{'='*60}\n")
+  # --- REPORT PRINTING ---
+  if verbose:
+    print(f"\n--- 1. Global & Limit Metrics ---")
+    print(f"Inf (MIST):       {fmt(inf_val)} s")
+    print(f"Sup (MaxIST):     {fmt(sup_val)} s")
+    print(f"InfLimInf:        {fmt(inf_liminf)} s")
+    print(f"SupLimSup:        {fmt(sup_limsup)} s")
+
+    print(f"\n--- 2. Complexity & Chaos ---")
+    print(f"Behavioral Entropy: {fmt(entropy, 4)} bits")
+    print(f"Classification:     {complexity_class}")
+    print(f"Non-Trivial SCCs:   {non_trivial_sccs}")
+
+    print(f"\n--- 3. Performance Metrics (Average IET) ---")
+    print(f"{'Metric':<20} | {'Value':<12} | {'Description'}")
+    print("-" * 60)
+    print(f"{'InfLimAvg':<20} | {fmt(inf_lim_avg):<12} | Worst-case (Theoretical)")
+    print(f"{'SupLimAvg':<20} | {fmt(sup_lim_avg):<12} | Best-case (Theoretical)")
+
+    if savings_pct is not None:
+      savings_str = f"{savings_pct:.2f}%"
+      print(f"{'Min Savings':<20} | {savings_str:<12} | vs. Periodic (h={h_scalar}s)")
+
+    print("-" * 60)
+
+    print(f"\n--- 4. Robustness Analysis (Stability) ---")
+    print(f"Total Cycles Found: {len(cycle_metrics)}")
+    print(f"  - Stable:         {num_stable}")
+    print(f"  - Unstable:       {num_unstable}")
+
+    if rob_inf_lim_avg is not None:
+      print(f"\nROBUST InfLimAvg:   {fmt(rob_inf_lim_avg)} s")
+      print("Note: Guaranteed performance on physically observable orbits.")
+    else:
+      print(f"\nROBUST Metric:      {robustness_status}")
+
+    print(f"{'='*60}\n")
 
   return {
       "Inf": inf_val,
       "Sup": sup_val,
       "InfLimInf": inf_liminf,
+      "SupLimSup": sup_limsup,
       "InfLimAvg": inf_lim_avg,
       "SupLimAvg": sup_lim_avg,
       "Entropy": entropy,
       "IsChaotic": is_chaotic,
+      "ComplexityClass": complexity_class,
+      "NonTrivialSCCs": non_trivial_sccs,
+      "TotalCycles": len(cycle_metrics),
+      "StableCycles": num_stable,
+      "UnstableCycles": num_unstable,
       "RobInfLimAvg": rob_inf_lim_avg,
+      "RobSupLimAvg": rob_sup_lim_avg,
+      "RobustnessStatus": robustness_status,
       "SavingsPct": savings_pct
   }
 
@@ -1125,3 +1147,47 @@ def plot_cycle_distribution(G, h):
 
   except Exception as e:
     print(f"Error plotting cycle distribution: {e}")
+
+
+def export_metrics_to_csv(metrics, filename="metrics.csv"):
+  """
+  Exports a metrics dictionary to a CSV file, appending if the file exists.
+
+  This function handles numpy types and ensures that if the file already exists,
+  the new data aligns with the existing columns.
+
+  Args:
+      metrics (dict): The dictionary containing metric names and values.
+      filename (str): The target CSV file path.
+  """
+
+  # 1. Clean numpy types for serialization
+  clean_metrics = {}
+  for k, v in metrics.items():
+    if hasattr(v, 'item'):
+      clean_metrics[k] = v.item()
+    else:
+      clean_metrics[k] = v
+
+  file_exists = os.path.isfile(filename)
+  fieldnames = list(clean_metrics.keys())
+
+  # 2. If file exists, read header to ensure column alignment
+  if file_exists:
+    try:
+      with open(filename, 'r', newline='', encoding='utf-8') as f:
+        reader = csv.reader(f)
+        existing_header = next(reader, None)
+        if existing_header:
+          fieldnames = existing_header
+    except Exception as e:
+      print(f"Warning: Could not read existing CSV header: {e}")
+
+  # 3. Write data
+  with open(filename, mode='a', newline='', encoding='utf-8') as f:
+    writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
+
+    if not file_exists or f.tell() == 0:
+      writer.writeheader()
+
+    writer.writerow(clean_metrics)

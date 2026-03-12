@@ -6,6 +6,8 @@ event_based_control.egg-info/
 build/
 dist/
 .ipynb_checkpoints
+*.csv
+*.html
 
 # Byte-compiled files (Recursive)
 **/__pycache__/

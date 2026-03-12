@@ -65,7 +65,7 @@
   "design_params": {
     "save": true,
     "h": 5e-3,
-    "iet_max": 50e-3,
+    "iet_max": 25e-3,
     "υ": 1e-1
   }
 }
