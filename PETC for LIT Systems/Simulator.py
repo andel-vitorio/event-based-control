@@ -6,6 +6,11 @@ Provides strict I/O handling and native OpenMP parallel processing support.
 Ensures determinism and bypasses Windows CLI limits using binary state transfer.
 """
 
+from typing import List, Tuple, Set, Optional
+from typing import Tuple, List, Optional, Any
+from typing import Any, Dict, Optional, List, Tuple
+import scipy.sparse as sp
+from typing import Dict, Any, Optional
 import matplotlib.pyplot as plt
 import scipy.linalg as la
 import scipy.sparse.linalg as sla
@@ -375,10 +380,10 @@ def visualize_graph(G, sequence=None, filename="symbolic_model_final.html"):
   custom_ui = f"""
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap');
-        
+
         #thesis-ui {{
             position: absolute; top: 20px; right: 20px; width: 260px;
-            padding: 20px; 
+            padding: 20px;
             background: rgba(255, 255, 255, 0.85);
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
@@ -389,22 +394,22 @@ def visualize_graph(G, sequence=None, filename="symbolic_model_final.html"):
             z-index: 1000;
             transition: all 0.3s ease;
         }}
-        
+
         #thesis-ui:hover {{
             box-shadow: 0 15px 50px rgba(0, 0, 0, 0.15);
             transform: translateY(-2px);
         }}
 
         h3 {{ margin: 0 0 15px 0; font-size: 16px; color: #1c1c1e; font-weight: 600; letter-spacing: -0.5px; }}
-        
+
         .legend-row {{ display: flex; align-items: center; margin-bottom: 8px; font-size: 13px; color: #3a3a3c; }}
         .dot {{ width: 10px; height: 10px; border-radius: 50%; margin-right: 12px; }}
         .line {{ width: 20px; height: 3px; margin-right: 12px; border-radius: 2px; }}
-        
+
         .divider {{ height: 1px; background: rgba(0,0,0,0.08); margin: 15px 0; }}
-        
+
         .ctrl-panel {{ display: flex; justify-content: space-between; align-items: center; }}
-        
+
         button {{
             background: #007AFF; color: white; border: none; padding: 8px 16px;
             border-radius: 8px; font-weight: 600; font-size: 13px; cursor: pointer;
@@ -413,23 +418,23 @@ def visualize_graph(G, sequence=None, filename="symbolic_model_final.html"):
         }}
         button:hover {{ background: #0056D2; }}
         button:active {{ transform: scale(0.96); }}
-        
-        #step-counter {{ 
-            text-align: center; margin-top: 10px; font-size: 12px; 
-            color: #8E8E93; font-variant-numeric: tabular-nums; 
+
+        #step-counter {{
+            text-align: center; margin-top: 10px; font-size: 12px;
+            color: #8E8E93; font-variant-numeric: tabular-nums;
         }}
     </style>
 
     <div id="thesis-ui">
         <h3>Symbolic Control Viewer</h3>
-        
+
         <div class="legend-row"><span class="dot" style="background:#007AFF; box-shadow: 0 0 8px rgba(0,122,255,0.4);"></span> Trajectory</div>
         <div class="legend-row"><span class="dot" style="background:#FF9500;"></span> Attractor</div>
         <div class="legend-row"><span class="line" style="background:#FF2D55;"></span> Transition (k)</div>
         <div class="legend-row"><span class="line" style="background:#C7C7CC; border:1px dashed #aaa;"></span> Others</div>
-        
+
         <div class="divider"></div>
-        
+
         <div class="ctrl-panel">
             <button onclick="prevStep()">← Prev</button>
             <button onclick="nextStep()">Next →</button>
@@ -440,7 +445,7 @@ def visualize_graph(G, sequence=None, filename="symbolic_model_final.html"):
     <script>
         var sequenceIds = {json.dumps(sequence_ids)};
         var currentStep = 0;
-        
+
         // Animation Configuration
         var focusOptions = {{
             scale: 1.5,
@@ -456,14 +461,14 @@ def visualize_graph(G, sequence=None, filename="symbolic_model_final.html"):
         }});
 
         function updateUI() {{
-            document.getElementById('step-counter').innerText = 
+            document.getElementById('step-counter').innerText =
                 "Step " + (currentStep + 1) + " of " + sequenceIds.length;
         }}
 
         function focusNode(index) {{
             if(sequenceIds.length === 0) return;
             var nodeId = sequenceIds[index];
-            
+
             network.selectNodes([nodeId]);
             network.focus(nodeId, focusOptions);
             updateUI();
@@ -592,7 +597,7 @@ class SequenceReconstructor:
       return None
 
 
-def build_symbolic_exactly_graph(target_l, K_set, h, A, B, K, Xi, Psi, iet_max, verbose=True):
+def build_symbolic_exactly_graph_old(target_l, K_set, h, A, B, K, Xi, Psi, iet_max, verbose=True):
   """
   Constructs the symbolic graph by progressively increasing the sequence length.
 
@@ -670,6 +675,115 @@ def build_symbolic_exactly_graph(target_l, K_set, h, A, B, K, Xi, Psi, iet_max, 
   return G
 
 
+def build_symbolic_exactly_graph(
+    target_l: int,
+    K_set: List[int],
+    h: float,
+    A: np.ndarray,
+    B: np.ndarray,
+    K: np.ndarray,
+    Xi: np.ndarray,
+    Psi: np.ndarray,
+    iet_max: float,
+    verbose: bool = True
+) -> nx.DiGraph:
+  """
+  Constructs the l-complete symbolic graph utilizing topological pruning.
+
+  Extracts base transitions at layer 2 to act as an adjacency filter for higher 
+  dimensions, strictly bounding the combinatorial explosion of SMT verification queries.
+  """
+  if verbose:
+    print(f"=== [Init] Pre-calculating dynamics (Z3 Backend) ===")
+
+  reconstructor = SequenceReconstructor(A, B, K, Xi, Psi, h, iet_max)
+  valid_sequences: List[Tuple[int, ...]] = []
+
+  if verbose:
+    print(f"--- Layer 1 ---")
+
+  for k in K_set:
+    seq = (k,)
+    if reconstructor.find_compatible_state(seq) is not None:
+      valid_sequences.append(seq)
+
+  valid_base_transitions: Set[Tuple[int, int]] = set()
+
+  for length in range(2, target_l + 1):
+    if verbose:
+      print(f"--- Layer {length} ---")
+
+    next_valid_sequences: List[Tuple[int, ...]] = []
+    candidates_count = len(valid_sequences) * len(K_set)
+    smt_calls = 0
+
+    for seq in valid_sequences:
+      for k_next in K_set:
+        if length > 2 and (seq[-1], k_next) not in valid_base_transitions:
+          continue
+
+        candidate = seq + (k_next,)
+        smt_calls += 1
+
+        if reconstructor.find_compatible_state(candidate) is not None:
+          next_valid_sequences.append(candidate)
+          if length == 2:
+            valid_base_transitions.add((seq[-1], k_next))
+
+    dropped = candidates_count - len(next_valid_sequences)
+    pruned_by_topology = candidates_count - smt_calls
+
+    if verbose:
+      print(
+          f"   Candidates: {candidates_count} | Valid: {len(next_valid_sequences)}")
+      print(
+          f"   Topological Pruning Avoided {pruned_by_topology} SMT calls.")
+      print(f"   Total Dropped: {dropped}")
+
+    if not next_valid_sequences:
+      if verbose:
+        print("WARNING: No valid sequences found at this length!")
+      break
+
+    valid_sequences = next_valid_sequences
+
+  feasible_nodes = valid_sequences
+  feasible_nodes_set = set(feasible_nodes)
+  G = nx.DiGraph()
+  G.add_nodes_from(feasible_nodes)
+
+  if verbose:
+    print(
+        f"=== [Edges] Generating edges (Extension to size {target_l + 1}) ===")
+
+  count_edges = 0
+
+  for node_a in feasible_nodes:
+    for k_next in K_set:
+      if (node_a[-1], k_next) not in valid_base_transitions:
+        continue
+
+      node_b = node_a[1:] + (k_next,)
+
+      if node_b in feasible_nodes_set:
+        transition_seq = node_a + (k_next,)
+        if reconstructor.find_compatible_state(transition_seq) is not None:
+          G.add_edge(
+              node_a,
+              node_b,
+              weight=node_a[0],
+              label=str(node_a[0])
+          )
+          count_edges += 1
+
+  if verbose:
+    print("\n=== Final Report ===")
+    print(f"Final Nodes: {len(feasible_nodes)}")
+    print(f"Edges:       {count_edges}")
+
+  return G
+
+
 class SequenceRegionAnalyzer:
   """
   Analyzes and determines the analytical angular regions (cones) in the phase plane.
@@ -681,7 +795,7 @@ class SequenceRegionAnalyzer:
   def __init__(self, reconstructor):
     """
     Args:
-        reconstructor: Instance of SequenceReconstructor containing 
+        reconstructor: Instance of SequenceReconstructor containing
                        pre-computed Phi and M matrices.
     """
     self.rec = reconstructor
@@ -835,318 +949,230 @@ def verify_region_robustness(target_seq, region_list, config, prob_results, expe
           f"Sample {fail['sample_idx']}: θ = {fail['angle_deg']:.6f}° -> Got {fail['got']}")
 
 
-def compute_analytical_metrics(G, h, reconstructor, verbose=True):
+def extract_k_val(node: Any) -> int:
   """
-  Generates a comprehensive analytical report of ETC traffic metrics.
-
-  This function calculates global limits, recurrence limits, behavioral entropy,
-  and performance metrics based on the symbolic graph structure.
+  Extracts the inter-event time scalar 'k' from a node representation.
+  The weight corresponds strictly to the first element of the sequence
+  per the formal definition of l-complete traffic models.
   """
+  val = node[0] if isinstance(node, (tuple, list)) else node
+  return int(val)
 
-  if G.number_of_nodes() == 0:
-    print("Error: Empty graph.")
-    return {}
 
-  if verbose:
-    print(f"\n{'='*60}")
-    print(f"FULL ANALYTICAL TRAFFIC REPORT (Gleizer & Mazo Jr., 2023)")
-    print(f"{'='*60}")
-    print(
-        f"Graph Structure: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
+def karp_minimum_mean_cycle(
+    G: nx.DiGraph,
+    h_scalar: float,
+    maximize: bool = False
+) -> Tuple[Optional[float], List[Any]]:
+  """
+  Implements Karp's algorithm (1978) to find the Minimum or Maximum Mean Weight Cycle.
+  Computes the critical mean and mathematically reconstructs the sequence of nodes comprising the cycle.
+  """
+  n = G.number_of_nodes()
+  if n == 0:
+    return None, []
 
-  def get_k(node):
-    try:
-      val = node[-1] if isinstance(node, (tuple, list)) else node
-      return int(val)
-    except:
-      return int(node)
+  nodes = list(G.nodes())
+  node_to_idx = {node: i for i, node in enumerate(nodes)}
 
-  def fmt(val, precision=5):
-    return f"{val:.{precision}f}" if val is not None else "N/A"
+  F = np.full((n + 1, n), np.inf if not maximize else -np.inf)
+  parent = np.full((n + 1, n), -1, dtype=int)
 
-  def get_matrix_from_cache(cache, k):
-    try:
-      if isinstance(cache, dict):
-        return cache.get(k)
-      elif isinstance(cache, (list, tuple, np.ndarray)):
-        if 0 <= k < len(cache):
-          return cache[k]
-        if k < len(cache):
-          return cache[k]
-      return None
-    except:
-      return None
+  F[0, :] = 0.0
 
-  inf_val = None
-  sup_val = None
-  inf_liminf = None
-  sup_limsup = None
-  entropy = None
-  is_chaotic = False
-  complexity_class = "Unknown"
+  edges = [(node_to_idx[u], node_to_idx[v], extract_k_val(u) * h_scalar)
+           for u, v in G.edges()]
+
+  for k in range(1, n + 1):
+    for u, v, weight in edges:
+      w = -weight if maximize else weight
+      if not np.isinf(F[k - 1, u]):
+        new_cost = F[k - 1, u] + w
+        if (not maximize and new_cost < F[k, v]) or (maximize and new_cost > F[k, v]):
+          F[k, v] = new_cost
+          parent[k, v] = u
+
+  best_mean = np.inf if not maximize else -np.inf
+  best_v = -1
+
+  for v in range(n):
+    if np.isinf(F[n, v]):
+      continue
+
+    v_max_val = -np.inf if not maximize else np.inf
+    for k in range(n):
+      if np.isinf(F[k, v]):
+        continue
+
+      val = (F[n, v] - F[k, v]) / (n - k)
+      if (not maximize and val > v_max_val) or (maximize and val < v_max_val):
+        v_max_val = val
+
+    if (not maximize and v_max_val < best_mean) or (maximize and v_max_val > best_mean):
+      best_mean = v_max_val
+      best_v = v
+
+  if best_v == -1:
+    return None, []
+
+  path = []
+  curr = best_v
+  for k in range(n, -1, -1):
+    path.append(curr)
+    curr = parent[k, curr]
+
+  visited = {}
+  cycle_nodes = []
+  for i, node_idx in enumerate(path):
+    if node_idx in visited:
+      cycle_indices = path[visited[node_idx]:i]
+      cycle_nodes = [nodes[idx] for idx in cycle_indices]
+      break
+    visited[node_idx] = i
+
+  cycle_nodes.reverse()
+
+  return abs(best_mean), cycle_nodes
+
+
+def compute_analytical_metrics(
+    G: nx.DiGraph,
+    h: float,
+    reconstructor: Optional[Any] = None,
+    verbose: bool = True
+) -> Dict[str, Any]:
+  """
+  Generates a comprehensive analytical report of ETC traffic metrics, strictly implementing
+  the quantitative automata formulations by Gleizer & Mazo Jr. (2023).
+  """
+  num_nodes = G.number_of_nodes()
+  if num_nodes == 0:
+    raise ValueError("Graph G topology is empty.")
+
+  h_scalar = float(h)
+  if h_scalar <= 0.0:
+    raise ValueError("Temporal scalar 'h' must be strictly positive.")
+
+  num_edges = G.number_of_edges()
+  all_ks = [extract_k_val(n) for n in G.nodes()]
+
+  inf_val = min(all_ks) * h_scalar
+  sup_val = max(all_ks) * h_scalar
+
+  sccs = list(nx.strongly_connected_components(G))
+  recurrent_ks = []
+  max_scc_size = 0
+  recurrent_nodes = set()
+
+  for scc in sccs:
+    if len(scc) > 1 or (len(scc) == 1 and G.has_edge(list(scc)[0], list(scc)[0])):
+      max_scc_size = max(max_scc_size, len(scc))
+      recurrent_nodes.update(scc)
+      recurrent_ks.extend([extract_k_val(n) for n in scc])
+
+  inf_liminf = min(recurrent_ks) * h_scalar if recurrent_ks else None
+  sup_limsup = max(recurrent_ks) * h_scalar if recurrent_ks else None
+
+  entropy = 0.0
+  if recurrent_nodes:
+    Gr = G.subgraph(recurrent_nodes)
+
+    if Gr.number_of_nodes() < 500:
+      adj_dense = nx.adjacency_matrix(Gr).toarray()
+      vals = np.linalg.eigvals(adj_dense)
+      rho = float(np.max(np.abs(vals)))
+    else:
+      adj_sparse = nx.adjacency_matrix(Gr).astype(float)
+      try:
+        vals = sla.eigs(adj_sparse, k=1, which='LM',
+                        return_eigenvectors=False)
+        rho = float(np.abs(vals[0]))
+      except sla.ArpackNoConvergence:
+        adj_dense = adj_sparse.toarray()
+        vals = np.linalg.eigvals(adj_dense)
+        rho = float(np.max(np.abs(vals)))
+
+    entropy = float(np.log2(rho)) if rho > (1.0 + 1e-9) else 0.0
+
+  is_chaotic = entropy > 1e-6
+
   inf_lim_avg = None
   sup_lim_avg = None
   rob_inf_lim_avg = None
-  rob_sup_lim_avg = None
-  num_stable = 0
-  num_unstable = 0
-  non_trivial_sccs = 0
-  max_scc_size = 0
-  cycle_metrics = []
+  is_mac_stable = False
   savings_pct = None
-  robustness_status = "Undefined"
 
-  try:
-    h_scalar = float(h)
-  except:
-    h_scalar = 0.005
-
-  # --- GLOBAL LIMITS ---
-  try:
-    all_ks = [get_k(n) for n in G.nodes()]
-    if all_ks:
-      inf_val = min(all_ks) * h_scalar
-      sup_val = max(all_ks) * h_scalar
-  except Exception as e:
-    print(f"Global limits error: {e}")
-
-  # --- RECURRENCE LIMITS (SCCs) ---
-  try:
-    sccs = list(nx.strongly_connected_components(G))
-    recurrent_ks = []
-
-    for scc in sccs:
-      if len(scc) > 1 or (len(scc) == 1 and G.has_edge(list(scc)[0], list(scc)[0])):
-        non_trivial_sccs += 1
-        max_scc_size = max(max_scc_size, len(scc))
-        for n in scc:
-          recurrent_ks.append(get_k(n))
-
-    if recurrent_ks:
-      inf_liminf = min(recurrent_ks) * h_scalar
-      sup_limsup = max(recurrent_ks) * h_scalar
-  except Exception as e:
-    print(f"SCC error: {e}")
-
-  # --- BEHAVIORAL ENTROPY ---
-  try:
-    if G.number_of_nodes() < 200:
-      try:
-        adj = nx.adjacency_matrix(G).todense()
-      except:
-        adj = nx.adjacency_matrix(G).toarray()
-      vals = la.eigvals(adj)
-      rho = float(max(abs(vals)))
-    else:
-      try:
-        adj = nx.adjacency_matrix(G).astype(float)
-      except:
-        adj = nx.adjacency_matrix(G).asfptype()
-      vals = sla.eigs(adj, k=1, which='LM', return_eigenvectors=False)
-      rho = float(abs(vals[0]))
-
-    entropy = np.log2(rho) if rho > 1.0 else 0.0
-    is_chaotic = entropy > 1e-6
-
-    complexity_class = "CHAOTIC" if is_chaotic else "ORDERLY"
-    if is_chaotic and max_scc_size > 10:
-      complexity_class += " (Complex Attractor)"
-
-  except Exception as e:
-    print(f"Entropy warning: {e}")
-
-  # --- CYCLE ANALYSIS & ROBUST METRICS ---
-  try:
-    dim = 2
-    if hasattr(reconstructor, 'M_cache') and reconstructor.M_cache:
+  if hasattr(reconstructor, 'M_cache') and reconstructor.M_cache:
+    def get_m_k(k: int) -> Optional[np.ndarray]:
       cache = reconstructor.M_cache
-      sample_matrix = None
       if isinstance(cache, dict):
-        if cache:
-          sample_matrix = next(iter(cache.values()))
-      elif isinstance(cache, (list, tuple)):
-        if len(cache) > 0:
-          sample_matrix = cache[0] if cache[0] is not None else (
-              cache[1] if len(cache) > 1 else None)
+        return cache.get(k)
+      if isinstance(cache, (list, tuple, np.ndarray)) and 0 <= k < len(cache):
+        return cache[k]
+      return None
 
-      if sample_matrix is not None:
-        dim = sample_matrix.shape[0]
+    # Extract limits using Karp's algorithm in polynomial time
+    min_mean, mac_cycle = karp_minimum_mean_cycle(
+        G, h_scalar, maximize=False)
+    max_mean, _ = karp_minimum_mean_cycle(G, h_scalar, maximize=True)
 
-    cycles = list(nx.simple_cycles(G))
-
-    for cycle in cycles:
-      ks = [get_k(n) for n in cycle]
-      if not ks:
-        continue
-
-      total_time = sum(ks) * h_scalar
-      mean_iet = float(total_time / len(ks))
-
-      M_sigma = np.eye(dim)
-
-      for k_val in ks:
-        k_int = int(k_val)
-        M_k = get_matrix_from_cache(reconstructor.M_cache, k_int)
-
-        if M_k is not None:
-          M_sigma = M_k @ M_sigma
-        else:
-          pass
-
-      eigvals = np.linalg.eigvals(M_sigma)
-      spec_rad = float(max(np.abs(eigvals)))
-      is_stable = spec_rad < (1.0 - 1e-9)
-
-      cycle_metrics.append({
-          "mean": mean_iet,
-          "stable": is_stable
-      })
-
-    if cycle_metrics:
-      all_means = [c["mean"] for c in cycle_metrics]
-      inf_lim_avg = min(all_means)
-      sup_lim_avg = max(all_means)
+    if min_mean is not None:
+      inf_lim_avg = min_mean
+      sup_lim_avg = max_mean
 
       if inf_lim_avg > 1e-9:
         savings_pct = (1.0 - (h_scalar / inf_lim_avg)) * 100.0
 
-      stable_means = [c["mean"] for c in cycle_metrics if c["stable"]]
-      if stable_means:
-        rob_inf_lim_avg = min(stable_means)
-        rob_sup_lim_avg = max(stable_means)
+      # Verify Schur stability specifically for the MAC
+      if mac_cycle:
+        sample_matrix = get_m_k(all_ks[0])
+        dim = sample_matrix.shape[0] if sample_matrix is not None else 2
+        M_sigma = np.eye(dim)
+        valid = True
 
-      num_stable = len(stable_means)
-      num_unstable = len(cycle_metrics) - num_stable
+        for n in mac_cycle:
+          M_k = get_m_k(extract_k_val(n))
+          if M_k is None:
+            valid = False
+            break
+          M_sigma = M_k @ M_sigma
 
-  except Exception as e:
-    print(f"Cycle analysis failed: {e}")
+        if valid:
+          spec_rad = float(
+              np.max(np.abs(np.linalg.eigvals(M_sigma))))
+          is_mac_stable = spec_rad < (1.0 - 1e-9)
+          if is_mac_stable:
+            rob_inf_lim_avg = inf_lim_avg
 
-  # Determine robustness status
-  if rob_inf_lim_avg is not None:
-    robustness_status = "Guaranteed"
-  elif not cycle_metrics:
-    robustness_status = "Undefined (No cycles found)"
-  elif num_stable == 0:
-    robustness_status = "Undefined (All cycles unstable/chaotic)"
-
-  # --- REPORT PRINTING ---
   if verbose:
-    print(f"\n--- 1. Global & Limit Metrics ---")
-    print(f"Inf (MIST):       {fmt(inf_val)} s")
-    print(f"Sup (MaxIST):     {fmt(sup_val)} s")
-    print(f"InfLimInf:        {fmt(inf_liminf)} s")
-    print(f"SupLimSup:        {fmt(sup_limsup)} s")
-
-    print(f"\n--- 2. Complexity & Chaos ---")
-    print(f"Behavioral Entropy: {fmt(entropy, 4)} bits")
-    print(f"Classification:     {complexity_class}")
-    print(f"Non-Trivial SCCs:   {non_trivial_sccs}")
-
-    print(f"\n--- 3. Performance Metrics (Average IET) ---")
-    print(f"{'Metric':<20} | {'Value':<12} | {'Description'}")
-    print("-" * 60)
-    print(f"{'InfLimAvg':<20} | {fmt(inf_lim_avg):<12} | Worst-case (Theoretical)")
-    print(f"{'SupLimAvg':<20} | {fmt(sup_lim_avg):<12} | Best-case (Theoretical)")
-
-    if savings_pct is not None:
-      savings_str = f"{savings_pct:.2f}%"
-      print(f"{'Min Savings':<20} | {savings_str:<12} | vs. Periodic (h={h_scalar}s)")
-
-    print("-" * 60)
-
-    print(f"\n--- 4. Robustness Analysis (Stability) ---")
-    print(f"Total Cycles Found: {len(cycle_metrics)}")
-    print(f"  - Stable:         {num_stable}")
-    print(f"  - Unstable:       {num_unstable}")
-
-    if rob_inf_lim_avg is not None:
-      print(f"\nROBUST InfLimAvg:   {fmt(rob_inf_lim_avg)} s")
-      print("Note: Guaranteed performance on physically observable orbits.")
-    else:
-      print(f"\nROBUST Metric:      {robustness_status}")
-
+    print(f"\n{'='*60}")
+    print(f"ANALYTICAL TRAFFIC REPORT (Karp 1978 DP Implementation)")
+    print(f"{'='*60}")
+    print(
+        f"Nodes: {num_nodes} | Edges: {num_edges} | Max SCC: {max_scc_size}")
+    print(f"Inf: {inf_val} | Sup: {sup_val}")
+    print(f"Entropy H(T_l): {entropy:.4f} bits | Chaotic: {is_chaotic}")
+    print(f"InfLimInf: {inf_liminf} | SupLimSup: {sup_limsup}")
+    print(f"InfLimAvg (MAC): {inf_lim_avg} | SupLimAvg: {sup_lim_avg}")
+    print(f"MAC Schur Stable: {is_mac_stable}")
+    print(
+        f"Robust InfLimAvg: {rob_inf_lim_avg if rob_inf_lim_avg else 'Undefined (MAC is Unstable/Chaotic)'}")
     print(f"{'='*60}\n")
 
   return {
+      "NumNodes": num_nodes,
+      "NumEdges": num_edges,
+      "Entropy": entropy,
       "Inf": inf_val,
       "Sup": sup_val,
       "InfLimInf": inf_liminf,
       "SupLimSup": sup_limsup,
       "InfLimAvg": inf_lim_avg,
       "SupLimAvg": sup_lim_avg,
-      "Entropy": entropy,
-      "IsChaotic": is_chaotic,
-      "ComplexityClass": complexity_class,
-      "NonTrivialSCCs": non_trivial_sccs,
-      "TotalCycles": len(cycle_metrics),
-      "StableCycles": num_stable,
-      "UnstableCycles": num_unstable,
       "RobInfLimAvg": rob_inf_lim_avg,
-      "RobSupLimAvg": rob_sup_lim_avg,
-      "RobustnessStatus": robustness_status,
+      "IsMACStable": is_mac_stable,
       "SavingsPct": savings_pct
   }
-
-
-def plot_cycle_distribution(G, h):
-  """
-  Plots a histogram of average inter-event times for all simple cycles in the symbolic graph.
-
-  This visualization displays the density of periodic traffic patterns.
-  """
-  try:
-    cycles = list(nx.simple_cycles(G))
-
-    if not cycles:
-      print("No cycles found in the graph.")
-      return
-
-    cycle_means = []
-    for cycle in cycles:
-      total_time = 0
-      for node in cycle:
-        try:
-          k = node[-1] if isinstance(node, (tuple, list)) else node
-        except:
-          k = node
-        total_time += float(k) * h
-
-      mean_val = total_time / len(cycle)
-      cycle_means.append(mean_val)
-
-    fig, ax = plt.subplots(figsize=(10, 6))
-
-    counts, bins, patches = ax.hist(
-        cycle_means,
-        bins=30,
-        color='#003366',
-        edgecolor='white',
-        alpha=0.7,
-        label='Cycle Means'
-    )
-
-    min_mean = min(cycle_means)
-    max_mean = max(cycle_means)
-
-    ax.axvline(min_mean, color='#B22222', linestyle='--', linewidth=2,
-               label=f'InfLimAvg (Worst Case): {min_mean:.5f}s')
-    ax.axvline(max_mean, color='#228B22', linestyle='--', linewidth=2,
-               label=f'SupLimAvg (Best Case): {max_mean:.5f}s')
-
-    ax.set_xlabel('Average Inter-Event Time [s]', fontsize=14)
-    ax.set_ylabel('Count of Simple Cycles', fontsize=14)
-    ax.set_title(
-        f'Distribution of Periodic Traffic Patterns (N={len(cycles)})', fontsize=16)
-    ax.legend(fontsize=12)
-    ax.grid(True, linestyle=':', alpha=0.6)
-
-    plt.tight_layout()
-    plt.show()
-
-    print(f"Total Simple Cycles Found: {len(cycles)}")
-
-  except Exception as e:
-    print(f"Error plotting cycle distribution: {e}")
 
 
 def export_metrics_to_csv(metrics, filename="metrics.csv"):

@@ -1,0 +1,77 @@
+Resultado para os parâmetros obtidos no projeto padrão do ETM:
+=== [Init] Pre-calculating dynamics (Z3 Backend) ===
+--- Layer 1 ---
+--- Layer 2 ---
+   Candidates: 100 | Valid: 40
+   Topological Pruning Avoided 0 SMT calls.
+   Total Dropped: 60
+--- Layer 3 ---
+   Candidates: 400 | Valid: 84
+   Topological Pruning Avoided 259 SMT calls.
+   Total Dropped: 316
+--- Layer 4 ---
+   Candidates: 840 | Valid: 136
+   Topological Pruning Avoided 562 SMT calls.
+   Total Dropped: 704
+=== [Edges] Generating edges (Extension to size 5) ===
+
+=== Final Report ===
+Final Nodes: 136
+Edges:       195
+
+Grafo gerado com 136 nós e 195 arestas.
+Entropia Comportamental (Topológica): 0.0000 bits
+
+-------------------------------------------------------------------------------
+
+
+Resultado para os parâmetros obtidos em  Otimização por Divergência Angular:
+=== [Init] Pre-calculating dynamics (Z3 Backend) ===
+--- Layer 1 ---
+--- Layer 2 ---
+   Candidates: 100 | Valid: 63
+   Topological Pruning Avoided 0 SMT calls.
+   Total Dropped: 37
+--- Layer 3 ---
+   Candidates: 630 | Valid: 308
+   Topological Pruning Avoided 204 SMT calls.
+   Total Dropped: 322
+--- Layer 4 ---
+   Candidates: 3080 | Valid: 1516
+   Topological Pruning Avoided 1005 SMT calls.
+   Total Dropped: 1564
+=== [Edges] Generating edges (Extension to size 5) ===
+
+=== Final Report ===
+Final Nodes: 1516
+Edges:       7607
+
+Grafo gerado com 1516 nós e 7607 arestas.
+Entropia Comportamental (Topológica): 2.3471 bits
+
+-------------------------------------------------------------------------------
+
+
+Resultado para os parâmetros obtidos em  Otimização por Entropia de Shannon:
+=== [Init] Pre-calculating dynamics (Z3 Backend) ===
+--- Layer 1 ---
+--- Layer 2 ---
+   Candidates: 100 | Valid: 21
+   Topological Pruning Avoided 0 SMT calls.
+   Total Dropped: 79
+--- Layer 3 ---
+   Candidates: 210 | Valid: 29
+   Topological Pruning Avoided 143 SMT calls.
+   Total Dropped: 181
+--- Layer 4 ---
+   Candidates: 290 | Valid: 36
+   Topological Pruning Avoided 198 SMT calls.
+   Total Dropped: 254
+=== [Edges] Generating edges (Extension to size 5) ===
+
+=== Final Report ===
+Final Nodes: 36
+Edges:       41
+
+Grafo gerado com 36 nós e 41 arestas.
+Entropia Comportamental (Topológica): 0.2579 bits
