@@ -1,3 +1,8 @@
+from typing import List
+from typing import Tuple, List, Set, Dict
+import scipy.linalg as linalg
+from collections import deque
+import networkx as ntx
 import scipy.sparse as sp
 from typing import Tuple, List, Set
 from z3 import *
@@ -14,11 +19,6 @@ from fractions import Fraction
 from typing import List, Tuple, Set
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor, as_completed
-
-# ============================================================================
-# 1. FUNÇÃO WORKER GLOBAL (Obrigatória para o Windows Multiprocessing)
-# ============================================================================
-# Esta função roda em um processo isolado. Recebe apenas tipos primitivos e NumPy.
 
 
 def _worker_expand_prefix(prefix: Tuple[int, ...], ell: int, K_set: List[int],
@@ -250,10 +250,6 @@ class TrafficModelBuilder:
       print(f"Edges:       {G.number_of_edges()}")
 
     return G
-
-# ============================================================================
-# 1. FUNÇÃO WORKER GLOBAL (Garantia de Exatidão Híbrida)
-# ============================================================================
 
 
 def _worker_hybrid_exact_expand(prefix, ell, K_set, A_cal, Q_v, valid_base, nx_dim, nu_bar):
@@ -1019,3 +1015,84 @@ class EntropyProjectBuilder:
       x_curr = [z3.Sum([Am[r][c] * x_curr[c]
                        for c in range(self.nx)]) for r in range(self.nx)]
     return solver.check() == sat
+
+
+class IsochronousPartitionModel:
+  def __init__(self, A: np.ndarray, B: np.ndarray, K: np.ndarray,
+               Xi: np.ndarray, Psi: np.ndarray, h: float, nu_bar_time: float):
+    self.nx = A.shape[0]
+    self.h = h
+    self.nu_bar = int(round(nu_bar_time / h))
+
+    # Discretização (ZOH)
+    sys_d = cont2discrete(
+        (A, B, np.zeros((1, self.nx)), np.zeros((1, B.shape[1]))), h, method='zoh')
+    self.Ad, self.Bd = sys_d[0], sys_d[1]
+
+    self.A_cal = [None] * (self.nu_bar + 1)
+    self.Q_v = [None] * (self.nu_bar + 1)
+    I = np.eye(self.nx)
+
+    for v in range(1, self.nu_bar + 1):
+      Ad_pow_v = np.linalg.matrix_power(self.Ad, v)
+      S_v = sum([np.linalg.matrix_power(self.Ad, p) for p in range(v)])
+      A_cal_v = Ad_pow_v + S_v @ self.Bd @ K
+      self.A_cal[v] = A_cal_v
+      diff = I - A_cal_v
+      self.Q_v[v] = (A_cal_v.T @ Psi @ A_cal_v) - (diff.T @ Xi @ diff)
+
+  def _to_rational(self, matrix):
+    return [[Q(Fraction(val).limit_denominator(10**10).numerator,
+               Fraction(val).limit_denominator(10**10).denominator) for val in row] for row in matrix]
+
+  def _add_region_constraint(self, solver, x_vec, k_index):
+    """Adiciona ao solver as restrições que definem a região isócrona R_k."""
+    # Não disparou antes de k
+    for m in range(1, k_index):
+      M_z3 = self._to_rational(self.Q_v[m])
+      quad = sum(x_vec[r] * M_z3[r][c] * x_vec[c]
+                 for r in range(self.nx) for c in range(self.nx))
+      solver.add(quad >= 0)
+    # Dispara exatamente em k
+    if k_index < self.nu_bar:
+      M_z3_trig = self._to_rational(self.Q_v[k_index])
+      quad_trig = sum(x_vec[r] * M_z3_trig[r][c] * x_vec[c]
+                      for r in range(self.nx) for c in range(self.nx))
+      solver.add(quad_trig < 0)
+
+  def build_partition_graph(self) -> nx.DiGraph:
+    """
+    Constrói o grafo de transição entre regiões (One-step Abstraction).
+    Complexidade: O(nu_bar^2) chamadas ao solver SMT.
+    """
+    G = nx.DiGraph()
+    # Os nós são simplesmente os índices dos intervalos possíveis
+    nodes = list(range(1, self.nu_bar + 1))
+    G.add_nodes_from(nodes)
+
+    print(
+        f"Verificando transições entre {self.nu_bar} regiões isócronas...")
+
+    for i in nodes:
+      for j in nodes:
+        solver = Solver()
+        x0 = [Real(f'x0_{r}') for r in range(self.nx)]
+        # Evitar origem
+        solver.add(sum([xr * xr for xr in x0]) > Q(1, 1000))
+        solver.add(sum([xr * xr for xr in x0]) <= 1)
+
+        # 1. x0 deve estar na região Ri
+        self._add_region_constraint(solver, x0, i)
+
+        # 2. x_next = A_cal_i * x0
+        Phi = self.A_cal[i]
+        x_next = [sum(float(Phi[r, c]) * x0[c]
+                      for c in range(self.nx)) for r in range(self.nx)]
+
+        # 3. x_next deve estar na região Rj
+        self._add_region_constraint(solver, x_next, j)
+
+        if solver.check() == sat:
+          G.add_edge(i, j)
+
+    return G
