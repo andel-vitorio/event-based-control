@@ -82,7 +82,7 @@
   "design_params": {
     "dspetc": {
       "save": true,
-      "h": 1e-3,
+      "h": 100e-3,
       "υ": 1e-1,
       "ε_γ": 1e-1,
       "λ": 1e-1,
