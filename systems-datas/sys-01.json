@@ -1,0 +1,68 @@
+{
+  "name": "system-01",
+  "system_matrices": {
+    "A": [
+      ["0.0", "1.0"],
+      ["3.75", "0.0"]
+    ],
+    "B": [["0."], ["0.25"]],
+    "C": [
+      ["1.", "0."],
+      ["0.", "1."]
+    ],
+    "D": null,
+    "E": null,
+    "F": null,
+    "Cz": null,
+    "Dz": null,
+    "Fz": null
+  },
+  "states": {
+    "x1": {
+      "name": "Posição Angular",
+      "symbol": "$x_1$",
+      "unit": ""
+    },
+    "x2": {
+      "name": "Velocidade Angular",
+      "symbol": "$x_2$",
+      "unit": ""
+    }
+  },
+  "parameters": {
+    "p1": {
+      "name": "Parâmetro $p(t)$",
+      "symbol": "$p$",
+      "unit": "",
+      "value": ".5 * cos(t)"
+    }
+  },
+  "disturbances": {
+    "w1": {
+      "name": "Distúrbio $w(t)$",
+      "symbol": "$w$",
+      "unit": "",
+      "value": "1 * exp(-2.25 * t) * sin(2.0 * PI * t)"
+    }
+  },
+  "inputs": {
+    "u1": {
+      "name": "Entrada $u(t)$",
+      "symbol": "$u$",
+      "unit": ""
+    }
+  },
+  "performance_outputs": null,
+  "outputs": {
+    "y1": {
+      "name": "Posição Angular",
+      "symbol": "$x_1$",
+      "unit": ""
+    },
+    "y2": {
+      "name": "Velocidade Angular",
+      "symbol": "$x_2$",
+      "unit": ""
+    }
+  }
+}
