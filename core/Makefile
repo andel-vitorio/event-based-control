@@ -3,7 +3,7 @@
 # =====================================================
 
 CXX      := g++
-CXXFLAGS := -std=c++26 -Wall -Wextra -Iinclude -Iinc -Ilib
+CXXFLAGS := -std=c++23 -Wall -Wextra -Iinclude -Iinc -Ilib
 CXXFLAGS += -Imodules/control_core/include
 
 OBJ_DIR := obj
@@ -16,10 +16,13 @@ TARGET := Main.exe
 # =====================================================
 
 # Procura arquivos .cpp na raiz, em src/, e em subdiretórios (até 3 níveis)
-# Isso funciona nativamente no Make de forma idêntica em Windows e Linux
-SRCS := $(wildcard *.cpp) \
-        $(wildcard libs/control-core/src/*.cpp) \
-        $(wildcard libs/control-core/src/**/*.cpp)
+SRC_DIRS := . \
+					src/PeriodicETC \
+					libs/control-core/src \
+					libs/control-core/src/Algebra \
+					libs/control-core/src/EDOSolvers
+
+SRCS := $(foreach dir,$(SRC_DIRS),$(wildcard $(dir)/*.cpp))
 
 # Converte os caminhos de fontes para objetos mantendo a estrutura interna
 # Exemplo: src/subpasta/Parser.cpp -> obj/src/subpasta/Parser.o

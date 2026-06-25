@@ -4,11 +4,16 @@
 #include <fstream>
 
 #include "libs/control-core/include/SystemParser.hpp"
+#include "libs/control-core/include/LITSystem.hpp"
 #include "libs/control-core/include/BinaryLogger.hpp"
 #include "libs/control-core/include/Algebra/Algebra.hpp"
 #include "libs/control-core/include/EDOSolvers/EDOSolvers.hpp"
 
+#include "include/PeriodicETC/LITEngine.hpp"
+
 using namespace Algebra;
+using PeriodicETC::LIT::Engine;
+
 namespace fs = std::filesystem;
 
 void matrices_test()
@@ -307,8 +312,42 @@ void EDO_RK45_test()
       << "\n";
 }
 
+void test_LITEngine_configuration()
+{
+  const std::filesystem::path json_path = "../experiments/data/sys-01.json";
+  Engine engine;
+
+  std::cout << "[TEST] Configuring LITEngine with path: " << json_path << std::endl;
+
+  try
+  {
+    engine.configure(json_path);
+    const auto &model = engine.getModel();
+
+    if (!model.A.has_value() || !model.B.has_value())
+    {
+      throw std::runtime_error("LITEngine failed validation: A or B matrices missing.");
+    }
+
+    std::cout << "[TEST] SUCCESS: LITEngine configured with system: " << model.name << std::endl;
+  }
+  catch (const std::exception &e)
+  {
+    std::cerr << "[TEST] FAILED: " << e.what() << std::endl;
+    throw; // Propagate to main for program termination
+  }
+}
+
 int main()
 {
-  EDO_RK5_test();
+  try
+  {
+    test_LITEngine_configuration();
+    std::cout << "All tests passed successfully." << std::endl;
+  }
+  catch (...)
+  {
+    return 1;
+  }
   return 0;
 }
