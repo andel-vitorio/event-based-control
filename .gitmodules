@@ -1,0 +1,3 @@
+[submodule "core/modules/control-systems"]
+	path = core/modules/control-systems
+	url = git@github.com:andel-vitorio/control-systems.git
