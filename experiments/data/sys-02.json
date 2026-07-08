@@ -34,7 +34,8 @@
       "name": "Parâmetro $p(t)$",
       "symbol": "$p$",
       "unit": "",
-      "value": ".5 * cos(t)"
+      "value": ".5 * cos(t)",
+      "bounds": [-1.0, 1.0]
     }
   },
   "disturbances": {

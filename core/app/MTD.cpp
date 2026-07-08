@@ -138,8 +138,28 @@ void simulate()
   std::cout << "Simulação concluída com sucesso!" << std::endl;
 }
 
+void test_parameters()
+{
+  using Matrix = Algebra::Matrix;
+  using Vector = Algebra::Vector;
+  std::filesystem::path jsonPath = "modules/control-systems/system-datas/sys-02.json";
+  StateSystemModel model = StateSystemParser::parseFromFile(jsonPath);
+
+  LPVSystem lpvSystem(model);
+
+  // auto rho = lpvSystem.buildVariableParameter(0.0);
+  Algebra::Variables rho;
+  rho["p1"] = 0.5;
+  Matrix A = lpvSystem.getMatrix("A", rho);
+
+  std::cout << "Matriz A em t=0: " << std::endl;
+  std::cout << A << std::endl;
+
+  std::cout << "Simulação concluída com sucesso!" << std::endl;
+}
+
 int main()
 {
-  simulate();
+  test_parameters();
   return 0;
 }

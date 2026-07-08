@@ -103,9 +103,7 @@ $(TARGET_TEST): $(OBJS_TEST)
 # =====================================================
 # DLL Generation
 # =====================================================
-
 define create_dll_rule
-
 $(DLL_DIR)/$(notdir $(basename $(1))).dll: \
 $(OBJ_DIR)/$(patsubst %.cpp,%.o,$(1)) \
 $$(CORE_OBJS)
@@ -116,7 +114,6 @@ $$(CORE_OBJS)
 		-static-libgcc \
 		-static-libstdc++ \
 		-static
-
 endef
 
 $(foreach src,$(INTERFACE_SRCS),\
