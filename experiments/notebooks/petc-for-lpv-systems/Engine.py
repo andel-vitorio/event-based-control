@@ -19,7 +19,7 @@ class Engine:
     if sys.platform == 'win32':
       os.add_dll_directory(os.path.dirname(self.dll_path))
 
-    # Carregamento da DLL ocorre automaticamente na criação do objeto
+    # Carregamento da DLL ocorre automaticamente na criação do objeto[cite: 8]
     self.lib = ctypes.CDLL(self.dll_path)
     self._initialize_dll_bindings()
     self.engine_ptr = self.lib.create()
@@ -49,6 +49,7 @@ class Engine:
     self.lib.get_time_data.argtypes = [ctypes.c_void_p]
     self.lib.get_time_data.restype = ctypes.POINTER(ctypes.c_double)
 
+    # --- BINDINGS DA SIMULAÇÃO EM MALHA FECHADA PADRÃO ---[cite: 8]
     self.lib.run_closed_loop.argtypes = [
         ctypes.c_void_p,
         ctypes.POINTER(ctypes.c_double), ctypes.c_int,  # x0_matrix, n_states
@@ -79,6 +80,46 @@ class Engine:
         ctypes.POINTER(ctypes.c_char_p), ctypes.POINTER(
             ctypes.c_double), ctypes.c_int,
         ctypes.POINTER(ctypes.c_double), ctypes.c_int, ctypes.c_int
+    ]
+
+    # --- NOVOS BINDINGS PARA SIMULAÇÃO MTD ---[cite: 7]
+    self.lib.run_closed_loop_mtd.argtypes = [
+        ctypes.c_void_p,
+        # x0_matrix, num_x0, n_states
+        ctypes.POINTER(ctypes.c_double), ctypes.c_int, ctypes.c_int,
+        # seeds_input, num_seeds, use_random_seeds
+        ctypes.POINTER(ctypes.c_uint), ctypes.c_int, ctypes.c_int,
+        ctypes.POINTER(ctypes.c_double), ctypes.c_int,  # K_matrix, nu
+        ctypes.POINTER(ctypes.c_double), ctypes.POINTER(
+            ctypes.c_double),  # Xi_matrix, Psi_matrix
+        # pi_tensor, n_modes, n_regions
+        ctypes.POINTER(ctypes.c_double), ctypes.c_int, ctypes.c_int,
+        ctypes.POINTER(ctypes.c_double), ctypes.POINTER(
+            ctypes.c_double),  # W_matrix, c_array
+        # sampling_period, sample_time, duration
+        ctypes.c_double, ctypes.c_double, ctypes.c_double
+    ]
+
+    self.lib.get_num_mtd_scenarios_results.argtypes = [ctypes.c_void_p]
+    self.lib.get_num_mtd_scenarios_results.restype = ctypes.c_int
+
+    self.lib.get_mtd_scenario_seed.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    self.lib.get_mtd_scenario_seed.restype = ctypes.c_uint
+
+    self.lib.get_mtd_scenario_data_sizes.argtypes = [
+        ctypes.c_void_p, ctypes.c_int,
+        ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int),
+        ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int),
+        ctypes.POINTER(ctypes.c_int), ctypes.POINTER(
+            ctypes.c_int)  # Adicionados buffers de modos e regiões
+    ]
+
+    self.lib.copy_mtd_scenario_results.argtypes = [
+        ctypes.c_void_p, ctypes.c_int,
+        ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),
+        ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),
+        ctypes.POINTER(ctypes.c_int), ctypes.POINTER(
+            ctypes.c_int)  # Buffers de saída de modos e regiões
     ]
 
   def close(self):
@@ -223,9 +264,113 @@ class Engine:
       results.append({
           "time": t_arr,
           "states": x_arr,
-          # Retorna o esforço de controle [N_Passos x Nu]
           "control": u_arr,
           "events": ev_arr
+      })
+
+    return results
+
+  def run_closed_loop_mtd_simulation(
+          self, x0_list, seeds=None, num_simulations=None,
+          K_table=None, Xi_table=None, Psi_table=None,
+          pi_tensor=None, W=None, c=None,
+          sampling_period=0.1, sample_time=0.0001, duration=20.0):
+    """
+    Executa a simulação em malha fechada com MTD de forma paralela via C++.
+
+    seeds: Lista de sementes fixas (Caso 1).
+    num_simulations: Quantidade de simulações aleatórias a gerar (Caso 2).
+    """
+    num_x0 = len(x0_list)
+    n_states = len(x0_list[0])
+    nu = K_table[0][0].shape[0] if hasattr(K_table[0][0], 'shape') else 1
+
+    n_modes = len(K_table)
+    n_regions = len(K_table[0])
+
+    # 1. Tratamento das Sementes (Caso 1 vs Caso 2)
+    if seeds is not None:
+      use_random_seeds = 0
+      seeds_array = np.ascontiguousarray(seeds, dtype=np.uint32)
+      num_seeds = len(seeds_array)
+    elif num_simulations is not None:
+      use_random_seeds = 1
+      seeds_array = np.zeros(
+          num_simulations, dtype=np.uint32)  # O C++ preencherá
+      num_seeds = num_simulations
+    else:
+      raise ValueError(
+          "Você deve fornecer ou uma lista de 'seeds' ou um 'num_simulations' inteiro.")
+
+    # 2. Achatamento das Matrizes Dependentes de Modo e Região (M x R x ...)
+    K_flat = np.ascontiguousarray(
+        np.array(K_table), dtype=np.float64).flatten()
+    Xi_flat = np.ascontiguousarray(
+        np.array(Xi_table), dtype=np.float64).flatten()
+    Psi_flat = np.ascontiguousarray(
+        np.array(Psi_table), dtype=np.float64).flatten()
+
+    # 3. Achatamento das matrizes estruturais do MTD
+    x0_flat = np.ascontiguousarray(x0_list, dtype=np.float64).flatten()
+    pi_flat = np.ascontiguousarray(pi_tensor, dtype=np.float64).flatten()
+    W_flat = np.ascontiguousarray(W, dtype=np.float64).flatten()
+    c_flat = np.ascontiguousarray(c, dtype=np.float64).flatten()
+
+    # 4. Chamada de Execução na DLL
+    self.lib.run_closed_loop_mtd(
+        self.engine_ptr,
+        x0_flat.ctypes.data_as(ctypes.POINTER(
+            ctypes.c_double)), num_x0, n_states,
+        seeds_array.ctypes.data_as(ctypes.POINTER(
+            ctypes.c_uint)), num_seeds, use_random_seeds,
+        K_flat.ctypes.data_as(ctypes.POINTER(ctypes.c_double)), nu,
+        Xi_flat.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+        Psi_flat.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+        pi_flat.ctypes.data_as(ctypes.POINTER(
+            ctypes.c_double)), n_modes, n_regions,
+        W_flat.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+        c_flat.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+        sampling_period, sample_time, duration
+    )
+
+    # 5. Resgate Estruturado de Dados por Cenário
+    total_scenarios = self.lib.get_num_mtd_scenarios_results(self.engine_ptr)
+    results = []
+
+    for i in range(total_scenarios):
+      t_sz, x_sz, u_sz, ev_sz, m_sz, r_sz = (
+          ctypes.c_int(), ctypes.c_int(), ctypes.c_int(),
+          ctypes.c_int(), ctypes.c_int(), ctypes.c_int()
+      )
+
+      self.lib.get_mtd_scenario_data_sizes(
+          self.engine_ptr, i,
+          ctypes.byref(t_sz), ctypes.byref(x_sz), ctypes.byref(u_sz),
+          ctypes.byref(ev_sz), ctypes.byref(m_sz), ctypes.byref(r_sz)
+      )
+
+      t_buf = (ctypes.c_double * t_sz.value)()
+      x_buf = (ctypes.c_double * x_sz.value)()
+      u_buf = (ctypes.c_double * u_sz.value)()
+      ev_buf = (ctypes.c_double * ev_sz.value)()
+      m_buf = (ctypes.c_int * m_sz.value)()
+      r_buf = (ctypes.c_int * r_sz.value)()
+
+      self.lib.copy_mtd_scenario_results(
+          self.engine_ptr, i, t_buf, x_buf, u_buf, ev_buf, m_buf, r_buf
+      )
+
+      # Recupera a semente real utilizada pelo cenário
+      scenario_seed = self.lib.get_mtd_scenario_seed(self.engine_ptr, i)
+
+      results.append({
+          "time": np.array(t_buf),
+          "states": np.array(x_buf).reshape(t_sz.value, n_states),
+          "control": np.array(u_buf).reshape(t_sz.value, nu),
+          "events": np.array(ev_buf),
+          "modes": np.array(m_buf),
+          "regions": np.array(r_buf),
+          "seed": scenario_seed
       })
 
     return results

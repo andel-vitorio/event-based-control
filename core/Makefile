@@ -23,6 +23,10 @@ ENTRY_SRC := app/$(APP).cpp
 TARGET_MAIN := $(BIN_DIR)/$(APP).exe
 TARGET_TEST := $(BIN_DIR)/TestRunner.exe
 
+ifdef app
+  APP := $(app)
+endif
+
 # =====================================================
 # Source Discovery
 # =====================================================
