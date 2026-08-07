@@ -31,14 +31,11 @@ endif
 # Source Discovery
 # =====================================================
 
-SRC_DIRS := \
-	src \
-	src/PeriodicETC \
-	modules/control-systems/src \
-	modules/control-systems/src/Algebra \
-	modules/control-systems/src/EDOSolvers
+rwildcard = $(wildcard $1$2) $(foreach d,$(wildcard $1*),$(if $(wildcard $d/),$(call rwildcard,$d/,$2)))
 
-SRC_FILES := $(foreach dir,$(SRC_DIRS),$(wildcard $(dir)/*.cpp))
+# Varre automaticamente todas as subpastas a partir de src/ e modules/control-systems/src/
+SRC_FILES := $(call rwildcard,src/,*.cpp) \
+             $(call rwildcard,modules/control-systems/src/,*.cpp)
 
 INTERFACE_SRCS := $(wildcard $(INT_DIR)/*.cpp)
 
