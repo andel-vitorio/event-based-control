@@ -9,7 +9,6 @@ namespace PeriodicETC
 {
   namespace LIT
   {
-
     struct OpenLoopResult
     {
       std::vector<double> time_data;
@@ -30,6 +29,6 @@ namespace PeriodicETC
           double duration = 1.0,
           double time_step = 0.01);
     };
+  }
 
-  } // namespace LIT
 } // namespace PeriodicETC

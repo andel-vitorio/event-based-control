@@ -119,7 +119,7 @@ void simulate()
 
   Vector control_signal = K * x;
 
-  PeriodicETC::StaticSETM etm(Xi, Psi);
+  PeriodicETC::LIT_SETM::StaticETM etm(Xi, Psi);
   SimulationStats stats;
 
   for (const auto t : timepts)
