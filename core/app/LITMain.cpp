@@ -108,6 +108,90 @@ void run_closed_loop_setm_simulation(PeriodicETC::LITEngine &engine)
             << " | Total triggers: " << result.trigger_times.size() << std::endl;
 }
 
+void run_closed_loop_setm_event_map_simulation(PeriodicETC::LITEngine &engine)
+{
+  double duration = 20.0;
+  double time_step = 1e-4;
+  double sampling_period = 0.25;
+
+  int state_dim = engine.getStateDim();
+  Vector x0(state_dim);
+  x0[0] = 0.5;
+  x0[1] = -0.25;
+
+  // Matrix K(1, 2, {-4.19, -5.71});
+  // Matrix Xi(2, 2, {1.46e5, 1.84e5, 1.84e5, 2.48e5});
+  // Matrix Psi(2, 2, {2.56e4, 1.21e4, 1.21e4, 1.62e4});
+
+  Matrix K(1, 2, {-1.01, -3.25});
+  Matrix Xi(2, 2, {1.77e4, 5.16e4, 5.16e4, 1.64e5});
+  Matrix Psi(2, 2, {2.78e3, 8.18e2, 8.18e2, 2.15e3});
+
+  PeriodicETC::LIT_SETM::StaticETMConfig etm_config;
+  etm_config.sigma = 1.0;
+  etm_config.threshold = 0.0;
+
+  // Chamada via runClosedLoopExtended para reter o objeto ExtendedClosedLoopResult
+  auto result = engine.runClosedLoopExtended(
+      x0, K, etm_config, sampling_period, duration, time_step, "SETM_EVENT_MAP", std::nullopt);
+
+  fs::path dir = "simulations/lit-system-closed-loop-setm-event-map";
+  fs::create_directories(dir);
+
+  BinaryLogger::dump(dir / "time.bin", result.time_data);
+  BinaryLogger::dump(dir / "trigger_times.bin", result.trigger_times);
+
+  int num_steps = static_cast<int>(result.time_data.size());
+
+  // 1. Exportação dos estados reais da planta (x1.bin, x2.bin, ...)
+  for (int i = 0; i < state_dim; ++i)
+  {
+    std::vector<double> state_trajectory;
+    state_trajectory.reserve(num_steps);
+    for (int step = 0; step < num_steps; ++step)
+      state_trajectory.push_back(result.states_data[step * state_dim + i]);
+    std::string filename = "x" + std::to_string(i + 1) + ".bin";
+    BinaryLogger::dump(dir / filename, state_trajectory);
+  }
+
+  // 2. Exportação dos estados estimados via mapa de eventos (x_est1.bin, x_est2.bin, ...)
+  for (int i = 0; i < state_dim; ++i)
+  {
+    std::vector<double> est_state_trajectory;
+    est_state_trajectory.reserve(num_steps);
+    for (int step = 0; step < num_steps; ++step)
+      est_state_trajectory.push_back(result.estimated_states_data[step * state_dim + i]);
+    std::string filename = "x_est" + std::to_string(i + 1) + ".bin";
+    BinaryLogger::dump(dir / filename, est_state_trajectory);
+  }
+
+  // 3. Exportação do erro de estimação (e1.bin, e2.bin, ...)
+  for (int i = 0; i < state_dim; ++i)
+  {
+    std::vector<double> error_trajectory;
+    error_trajectory.reserve(num_steps);
+    for (int step = 0; step < num_steps; ++step)
+      error_trajectory.push_back(result.estimation_error_data[step * state_dim + i]);
+    std::string filename = "e" + std::to_string(i + 1) + ".bin";
+    BinaryLogger::dump(dir / filename, error_trajectory);
+  }
+
+  // 4. Exportação dos sinais de controle (u1.bin, ...)
+  int input_dim = 1;
+  for (int i = 0; i < input_dim; ++i)
+  {
+    std::vector<double> control_trajectory;
+    control_trajectory.reserve(num_steps);
+    for (int step = 0; step < num_steps; ++step)
+      control_trajectory.push_back(result.control_data[step * input_dim + i]);
+    std::string filename = "u" + std::to_string(i + 1) + ".bin";
+    BinaryLogger::dump(dir / filename, control_trajectory);
+  }
+
+  std::cout << "Closed-loop SETM (Event Map) simulation completed. Data saved in: " << dir
+            << " | Total triggers: " << result.trigger_times.size() << std::endl;
+}
+
 int main()
 {
   std::string systems_directory = "../experiments/data/";
@@ -122,7 +206,8 @@ int main()
     std::cout << "Number of states in the loaded LIT system: " << number_states << std::endl;
 
     // run_open_loop_simulation(engine);
-    run_closed_loop_setm_simulation(engine);
+    // run_closed_loop_setm_simulation(engine);
+    run_closed_loop_setm_event_map_simulation(engine);
   }
   catch (const std::exception &ex)
   {

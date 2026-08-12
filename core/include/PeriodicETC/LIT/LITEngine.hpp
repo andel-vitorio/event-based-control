@@ -10,12 +10,10 @@
 
 namespace PeriodicETC
 {
-  using namespace ControlSystems;
-
   class LITEngine
   {
   private:
-    std::unique_ptr<LITSystem> plant;
+    std::unique_ptr<ControlSystems::LITSystem> plant;
     bool system_loaded;
     int state_dim;
 
@@ -43,6 +41,16 @@ namespace PeriodicETC
         double time_step = 1e-4,
         const std::string &type = "SETM",
         std::optional<Algebra::Vector> w = std::nullopt);
+
+    LIT_SETM::ExtendedClosedLoopResult runClosedLoopExtended(
+        const Algebra::Vector &x0,
+        const Algebra::Matrix &K,
+        const LIT_SETM::StaticETMConfig &etm_config,
+        double sampling_period,
+        double duration,
+        double time_step,
+        const std::string &type,
+        std::optional<Algebra::Vector> w);
   };
 
 } // namespace PeriodicETC

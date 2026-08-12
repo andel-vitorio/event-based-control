@@ -18,18 +18,34 @@ namespace PeriodicETC
       std::vector<double> trigger_times;
     };
 
-    class ClosedLoopSimulator
+    struct ExtendedClosedLoopResult : public ClosedLoopResult
     {
-    public:
-      static ClosedLoopResult run(
-          ControlSystems::LITSystem &plant,
-          const Algebra::Vector &x0,
-          const Algebra::Matrix &K,
-          const StaticETMConfig &etm_config,
-          double sampling_period,
-          double duration,
-          double time_step,
-          std::optional<Algebra::Vector> w = std::nullopt);
+      std::vector<double> estimated_states_data;
+      std::vector<double> estimation_error_data;
     };
-  } // namespace LIT
+
+    /**
+     * @brief Executa a simulação em malha fechada para o sistema LIT.
+     */
+    ClosedLoopResult run_standard_simulation(
+        ControlSystems::LITSystem &plant,
+        const Algebra::Vector &x0,
+        const Algebra::Matrix &K,
+        const StaticETMConfig &etm_config,
+        double sampling_period,
+        double duration,
+        double time_step,
+        std::optional<Algebra::Vector> w = std::nullopt);
+
+    ExtendedClosedLoopResult run_event_map_simulation(
+        ControlSystems::LITSystem &plant,
+        const Algebra::Vector &x0,
+        const Algebra::Matrix &K,
+        const StaticETMConfig &etm_config,
+        double sampling_period,
+        double duration,
+        double time_step,
+        std::optional<Algebra::Vector> w = std::nullopt);
+
+  } // namespace LIT_SETM
 } // namespace PeriodicETC
