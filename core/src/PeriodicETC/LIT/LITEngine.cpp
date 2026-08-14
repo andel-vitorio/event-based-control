@@ -73,6 +73,7 @@ namespace PeriodicETC
   LIT_SETM::ExtendedClosedLoopResult LITEngine::runClosedLoopExtended(
       const Algebra::Vector &x0,
       const Algebra::Matrix &K,
+      const Algebra::Matrix &L,
       const LIT_SETM::StaticETMConfig &etm_config,
       double sampling_period,
       double duration,
@@ -87,11 +88,16 @@ namespace PeriodicETC
 
     if (type == "SETM_EVENT_MAP" || type == "EVENT_MAP")
     {
-      return LIT_SETM::run_event_map_simulation(
-          *plant, x0, K, etm_config, sampling_period, duration, time_step, w);
+      return LIT_SETM::run_observer_based_petc_simulation(
+          *plant, x0, K, L, etm_config, sampling_period, duration, time_step, w);
     }
 
     throw std::invalid_argument("Unknown extended closed-loop type: " + type);
+  }
+
+  ControlSystems::LITSystem *LITEngine::getPlant() const
+  {
+    return plant.get();
   }
 
 } // namespace PeriodicETC

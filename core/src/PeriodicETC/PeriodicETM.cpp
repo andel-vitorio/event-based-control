@@ -1,4 +1,5 @@
 #include "PeriodicETC/PeriodicETM.hpp"
+#include <iostream>
 
 namespace PeriodicETC
 {
@@ -25,11 +26,21 @@ namespace PeriodicETC
     {
       if (config_.Psi.rows() == 0 || config_.Psi.cols() == 0)
       {
+        std::cerr
+            << "[WARNING] StaticETM: Psi was not provided. "
+            << "Using the identity matrix as default."
+            << std::endl;
+
         config_.Psi = identity(n_states);
       }
 
       if (config_.Xi.rows() == 0 || config_.Xi.cols() == 0)
       {
+        std::cerr
+            << "[WARNING] StaticETM: Xi was not provided. "
+            << "Using the identity matrix as default."
+            << std::endl;
+
         config_.Xi = identity(n_states);
       }
     }

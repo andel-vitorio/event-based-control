@@ -57,20 +57,26 @@ void run_closed_loop_setm_simulation(PeriodicETC::LITEngine &engine)
 {
   double duration = 15.0;
   double time_step = 1e-4;
-  double sampling_period = 0.05;
+  double sampling_period = 0.1;
+  // double sampling_period = 0.05;
 
   int state_dim = engine.getStateDim();
   Vector x0(state_dim);
   for (int i = 0; i < state_dim; ++i)
     x0[i] = 1.0;
 
-  Matrix K(1, 2, {-6.56e-2, -1.08e1});
-  Matrix Xi(2, 2, {1.78, 3.89e-1, 3.89e-1, 3.27e1});
-  Matrix Psi(2, 2, {1.60, 3.50e-1, 3.50e-1, 2.94e1});
+  // Matrix K(1, 2, {-6.56e-2, -1.08e1});
+  // Matrix Xi(2, 2, {1.78, 3.89e-1, 3.89e-1, 3.27e1});
+  // Matrix Psi(2, 2, {1.60, 3.50e-1, 3.50e-1, 2.94e1});
+  Matrix K(1, 2, {-3.73e+01, -1.77e+01});
+  Matrix Xi(2, 2, {1.07e+06, 5.09e+05, 5.09e+05, 2.41e+05});
+  Matrix Psi(2, 2, {3.77e+04, 1.68e+04, 1.68e+04, 1.85e+04});
 
   PeriodicETC::LIT_SETM::StaticETMConfig etm_config;
   etm_config.sigma = 1.0;
   etm_config.threshold = 0.0;
+  etm_config.Psi = Psi;
+  etm_config.Xi = Xi;
 
   auto result = engine.runClosedLoop(
       x0, K, etm_config, sampling_period, duration, time_step, "SETM", null);
@@ -112,28 +118,28 @@ void run_closed_loop_setm_event_map_simulation(PeriodicETC::LITEngine &engine)
 {
   double duration = 20.0;
   double time_step = 1e-4;
-  double sampling_period = 0.25;
+  double sampling_period = 0.1;
 
   int state_dim = engine.getStateDim();
   Vector x0(state_dim);
   x0[0] = 0.5;
   x0[1] = -0.25;
 
-  // Matrix K(1, 2, {-4.19, -5.71});
-  // Matrix Xi(2, 2, {1.46e5, 1.84e5, 1.84e5, 2.48e5});
-  // Matrix Psi(2, 2, {2.56e4, 1.21e4, 1.21e4, 1.62e4});
-
-  Matrix K(1, 2, {-1.01, -3.25});
-  Matrix Xi(2, 2, {1.77e4, 5.16e4, 5.16e4, 1.64e5});
-  Matrix Psi(2, 2, {2.78e3, 8.18e2, 8.18e2, 2.15e3});
+  Matrix K(1, 2, {-3.73e+01, -1.77e+01});
+  Matrix L(2, 2, {6.60e-01, -4.52e-03, -1.02e-02, 6.73e-01});
+  // Matrix L(2, 2, {1.0, 0.0, 0.0, 1.0});
+  Matrix Xi(2, 2, {1.07e+06, 5.09e+05, 5.09e+05, 2.41e+05});
+  Matrix Psi(2, 2, {3.77e+04, 1.68e+04, 1.68e+04, 1.85e+04});
 
   PeriodicETC::LIT_SETM::StaticETMConfig etm_config;
   etm_config.sigma = 1.0;
   etm_config.threshold = 0.0;
+  etm_config.Psi = Psi;
+  etm_config.Xi = Xi;
 
   // Chamada via runClosedLoopExtended para reter o objeto ExtendedClosedLoopResult
   auto result = engine.runClosedLoopExtended(
-      x0, K, etm_config, sampling_period, duration, time_step, "SETM_EVENT_MAP", std::nullopt);
+      x0, K, L, etm_config, sampling_period, duration, time_step, "SETM_EVENT_MAP", std::nullopt);
 
   fs::path dir = "simulations/lit-system-closed-loop-setm-event-map";
   fs::create_directories(dir);
@@ -195,7 +201,7 @@ void run_closed_loop_setm_event_map_simulation(PeriodicETC::LITEngine &engine)
 int main()
 {
   std::string systems_directory = "../experiments/data/";
-  fs::path jsonPath = systems_directory + "sys-01.json";
+  fs::path jsonPath = systems_directory + "sys-03.json";
 
   try
   {
@@ -203,7 +209,15 @@ int main()
     engine.loadSystem(jsonPath.string());
 
     int number_states = engine.getStateDim();
-    std::cout << "Number of states in the loaded LIT system: " << number_states << std::endl;
+    std::cout << "Number of states in the loaded LIT system: "
+              << number_states << std::endl;
+
+    ControlSystems::LITSystem *plant = engine.getPlant();
+    std::cout << "Plant matrices:" << std::endl;
+    std::cout << "A:\n"
+              << plant->getA() << std::endl;
+    std::cout << "B:\n"
+              << plant->getB() << std::endl;
 
     // run_open_loop_simulation(engine);
     // run_closed_loop_setm_simulation(engine);

@@ -25,6 +25,8 @@ namespace PeriodicETC
     bool isSystemLoaded() const;
     int getStateDim() const;
 
+    ControlSystems::LITSystem *getPlant() const;
+
     LIT::OpenLoopResult runOpenLoop(
         const Algebra::Vector &x0,
         std::optional<Algebra::Vector> u = std::nullopt,
@@ -45,6 +47,7 @@ namespace PeriodicETC
     LIT_SETM::ExtendedClosedLoopResult runClosedLoopExtended(
         const Algebra::Vector &x0,
         const Algebra::Matrix &K,
+        const Algebra::Matrix &L,
         const LIT_SETM::StaticETMConfig &etm_config,
         double sampling_period,
         double duration,

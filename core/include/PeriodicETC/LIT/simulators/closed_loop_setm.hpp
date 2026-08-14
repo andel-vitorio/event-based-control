@@ -37,10 +37,11 @@ namespace PeriodicETC
         double time_step,
         std::optional<Algebra::Vector> w = std::nullopt);
 
-    ExtendedClosedLoopResult run_event_map_simulation(
+    ExtendedClosedLoopResult run_observer_based_petc_simulation(
         ControlSystems::LITSystem &plant,
         const Algebra::Vector &x0,
         const Algebra::Matrix &K,
+        const Algebra::Matrix &L, // Ganho discreto do observador
         const StaticETMConfig &etm_config,
         double sampling_period,
         double duration,
