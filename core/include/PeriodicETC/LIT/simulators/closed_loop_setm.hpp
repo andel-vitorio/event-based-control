@@ -41,12 +41,13 @@ namespace PeriodicETC
         ControlSystems::LITSystem &plant,
         const Algebra::Vector &x0,
         const Algebra::Matrix &K,
-        const Algebra::Matrix &L, // Ganho discreto do observador
+        const Algebra::Matrix &L,
         const StaticETMConfig &etm_config,
         double sampling_period,
         double duration,
         double time_step,
-        std::optional<Algebra::Vector> w = std::nullopt);
+        std::optional<Algebra::Vector> w = std::nullopt,
+        double max_iet = 0.2);
 
   } // namespace LIT_SETM
 } // namespace PeriodicETC

@@ -116,20 +116,20 @@ void run_closed_loop_setm_simulation(PeriodicETC::LITEngine &engine)
 
 void run_closed_loop_setm_event_map_simulation(PeriodicETC::LITEngine &engine)
 {
-  double duration = 20.0;
+  double duration = 30.0;
   double time_step = 1e-4;
-  double sampling_period = 0.1;
+  double sampling_period = 1e-2;
 
   int state_dim = engine.getStateDim();
   Vector x0(state_dim);
-  x0[0] = 0.5;
-  x0[1] = -0.25;
+  x0[0] = 1.0;
+  x0[1] = -1.0;
 
-  Matrix K(1, 2, {-3.73e+01, -1.77e+01});
-  Matrix L(2, 2, {6.60e-01, -4.52e-03, -1.02e-02, 6.73e-01});
+  Matrix K(1, 2, {1.93e+00, -2.59e+00});
+  Matrix L(2, 1, {-2.77e-01, 5.72e-01});
   // Matrix L(2, 2, {1.0, 0.0, 0.0, 1.0});
-  Matrix Xi(2, 2, {1.07e+06, 5.09e+05, 5.09e+05, 2.41e+05});
-  Matrix Psi(2, 2, {3.77e+04, 1.68e+04, 1.68e+04, 1.85e+04});
+  Matrix Xi(1, 1, {7.98e+00});
+  Matrix Psi(1, 1, {6.23e-01});
 
   PeriodicETC::LIT_SETM::StaticETMConfig etm_config;
   etm_config.sigma = 1.0;
@@ -201,7 +201,7 @@ void run_closed_loop_setm_event_map_simulation(PeriodicETC::LITEngine &engine)
 int main()
 {
   std::string systems_directory = "../experiments/data/";
-  fs::path jsonPath = systems_directory + "sys-03.json";
+  fs::path jsonPath = systems_directory + "sys-01.json";
 
   try
   {
@@ -218,6 +218,8 @@ int main()
               << plant->getA() << std::endl;
     std::cout << "B:\n"
               << plant->getB() << std::endl;
+    std::cout << "C:\n"
+              << plant->getC() << std::endl;
 
     // run_open_loop_simulation(engine);
     // run_closed_loop_setm_simulation(engine);
