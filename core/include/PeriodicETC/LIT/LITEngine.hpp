@@ -54,6 +54,20 @@ namespace PeriodicETC
         double time_step,
         const std::string &type,
         std::optional<Algebra::Vector> w);
+
+    LIT_SETM::ExtendedClosedLoopResult runDualChannelClosedLoopExtended(
+        const Algebra::Vector &x0,
+        const Algebra::Vector &x_hat0,
+        const Algebra::Matrix &K,
+        const Algebra::Matrix &L,
+        const LIT_SETM::StaticETMConfig &etm_sc_config,
+        const LIT_SETM::StaticETMConfig &etm_ca_config,
+        double sampling_period,
+        double duration,
+        double time_step,
+        const std::string &type = "DUAL_CHANNEL_SETM",
+        std::optional<Algebra::Vector> w = std::nullopt,
+        double max_iet = std::numeric_limits<double>::infinity());
   };
 
 } // namespace PeriodicETC

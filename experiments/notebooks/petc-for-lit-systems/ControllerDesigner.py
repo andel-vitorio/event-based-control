@@ -192,88 +192,173 @@ from scipy.linalg import svd
 
 def synthesize_output_based_setm(
     design_params: Dict[str, Any],
-    eps: float = 1e-5,
+    eps: float = 1e-6,
     solver: str = cp.MOSEK,
     verbose: bool = False,
     dtype: np.dtype = np.float64,
 ) -> Optional[Dict[str, Any]]:
-  """Sintetiza o ganho do controlador K e as matrizes do SETM (Ξ, Ψ)
+  """Synthesize controller gain K and decoupled ETM matrices (SC and CA).
 
-  via relaxação politópica em simplex triangular (Teorema 2).
+  Formulation based on looped-functional, Finsler's lemma, and triangular simplex
+  relaxation in the transformed coordinates z(t) = exp(lambda*t) * T * x(t).
   """
   # -------------------------------------------------------------------------
-  # 1. Extração de Parâmetros
+  # 1. Parameter Extraction & System Setup
   # -------------------------------------------------------------------------
   A = np.asarray(design_params["A"], dtype=dtype)
   B = np.asarray(design_params["B"], dtype=dtype)
-  C = np.asarray(design_params["C"], dtype=dtype)
-  h = float(design_params["h"])
-  lam = float(design_params.get("λ", design_params.get("lambda", 0.1)))
-
-  upsilon1 = design_params.get("υ1")
-  upsilon2 = design_params.get("υ2")
 
   nx = A.shape[0]
   nu = B.shape[1]
-  ny = C.shape[0]
 
-  # Dimensão total do vetor aumentado: 5*nx + ny
+  h = float(design_params["h"])
+  lam = float(design_params.get("λ", design_params.get("lambda", 0.1)))
+
+  upsilon1 = float(
+      design_params.get("υ1", design_params.get("upsilon1", 1.0))
+  )
+  upsilon2 = float(
+      design_params.get("υ2", design_params.get("upsilon2", 1.0))
+  )
+  upsilon3 = float(
+      design_params.get("υ3", design_params.get("upsilon3", 1.0))
+  )
+  upsilon4 = float(
+      design_params.get("υ3", design_params.get("upsilon3", 1.0))
+  )
+
+  tol_zero = 1e-8
+  if abs(upsilon1) < tol_zero:
+    raise ValueError(
+        "O parâmetro upsilon1 (υ1) não pode ser zero para garantir a injeção do ganho de controle K."
+    )
+  if abs(upsilon2) < tol_zero:
+    raise ValueError(
+        "O parâmetro upsilon2 (υ2) não pode ser zero para garantir o acoplamento no subespaço delta_ca."
+    )
+  if upsilon3 <= tol_zero:
+    raise ValueError(
+        "O parâmetro upsilon3 (υ3) deve ser estritamente positivo (upsilon3 > 0) "
+        "para contrapor o termo +h*R no bloco (4,4) associado a z_dot."
+    )
+  if abs(upsilon4) < tol_zero:
+    raise ValueError(
+        "O parâmetro upsilon2 (υ2) não pode ser zero para garantir o acoplamento no subespaço delta_ca."
+    )
+
+  # Construction/extraction of coordinate transformation matrix T = [C; T2]
+  if "T" in design_params:
+    T = np.asarray(design_params["T"], dtype=dtype)
+    if "ny" in design_params:
+      ny = int(design_params["ny"])
+    elif "C" in design_params:
+      ny = np.asarray(design_params["C"], dtype=dtype).shape[0]
+    else:
+      raise ValueError(
+          "When providing 'T', specify 'ny' or 'C' explicitly.")
+  else:
+    if "C" not in design_params:
+      raise ValueError(
+          "Either 'T' or 'C' must be provided in design_params.")
+    C = np.asarray(design_params["C"], dtype=dtype)
+    ny = C.shape[0]
+    nx2 = nx - ny
+
+    if "T2" in design_params or "T_2" in design_params:
+      T2 = np.asarray(
+          design_params.get("T2", design_params.get("T_2")), dtype=dtype
+      )
+    else:
+      T2 = np.hstack([np.zeros((nx2, ny), dtype=dtype),
+                     np.eye(nx2, dtype=dtype)])
+
+    T = np.vstack([C, T2])
+
+  if T.shape != (nx, nx):
+    raise ValueError(
+        f"Matrix T must have shape ({nx}, {nx}), got {T.shape}.")
+
+  try:
+    T_inv = np.linalg.inv(T)
+  except np.linalg.LinAlgError:
+    raise ValueError("Transformation matrix T is singular.")
+
+  # Transformed nominal matrices
+  A_bar = T @ A @ T_inv
+  B_bar = T @ B
+  A_lambda = A_bar + lam * np.eye(nx, dtype=dtype)
+  exp_lam_h = float(np.exp(lam * h))
+
+  # -------------------------------------------------------------------------
+  # 2. Projection Operators for Extended Vector zeta_z,m(tau) (dim = 5*nx + ny)
+  #
+  # zeta = [z_m(tau); z_m(0); chi_m(tau); z_dot_m(tau); delta_m^ca(0); delta_1,m^sc(0)]
+  # -------------------------------------------------------------------------
   dim_zeta = 5 * nx + ny
-
-  # Projeções em bloco: e[1]..e[4] (nx), e[5] (ny), e[6] (nx)
-  # e[i] possui dimensão (n_i, dim_zeta)
+  block_dims = [nx, nx, nx, nx, nx, ny]
   e = {}
-  offsets = [0, nx, 2 * nx, 3 * nx, 4 * nx, 4 * nx + ny, dim_zeta]
-  dims = [nx, nx, nx, nx, ny, nx]
-  for i in range(1, 7):
-    mat = np.zeros((dims[i - 1], dim_zeta), dtype=dtype)
-    mat[:, offsets[i - 1]: offsets[i]] = np.eye(dims[i - 1], dtype=dtype)
-    e[i] = mat
+  offset = 0
+
+  for i, b_dim in enumerate(block_dims, start=1):
+    ei = np.zeros((b_dim, dim_zeta), dtype=dtype)
+    ei[:, offset: offset + b_dim] = np.eye(b_dim, dtype=dtype)
+    e[i] = ei
+    offset += b_dim
+
+  # Output selection from initial state: z_{1,m}(0) = J1 @ e_2 @ zeta
+  J1 = np.hstack(
+      [np.eye(ny, dtype=dtype), np.zeros((ny, nx - ny), dtype=dtype)])
+
+  # Augmented vectors: varpi(0) = kappa1 @ zeta, Pi(tau) = kappa2 @ zeta
+  κ1 = np.vstack([e[2], e[5]])
+  κ2 = np.vstack([e[1] - e[2], e[1] + e[2] - 2.0 * e[3]])
+  e12 = e[1] - e[2]
 
   # -------------------------------------------------------------------------
-  # 2. Variáveis de Decisão
+  # 3. Decision Variables
   # -------------------------------------------------------------------------
-  # Matrizes de Lyapunov e ETM (Restritas ao cone PSD e Simétricas)
-  Ptil = cp.Variable((nx, nx), PSD=True)
-  Rtil = cp.Variable((nx, nx), PSD=True)
+  Ptil = cp.Variable((nx, nx), symmetric=True)
+  Rtil = cp.Variable((nx, nx), symmetric=True)
+
   S1til = cp.Variable((nx, nx), symmetric=True)
-  Q1til = cp.Variable((nx, nx), symmetric=True)
-  Mtil = cp.Variable((2 * nx + ny, 2 * nx + ny), symmetric=True)
-  Ξtil = cp.Variable((ny, ny), PSD=True)
-  Ψtil = cp.Variable((ny, ny), PSD=True)
-  Sδtil = cp.Variable((nx, nx), PSD=True)
-
-  # Multiplicadores de folga e laço (Genéricos)
   S2til = cp.Variable((nx, nx))
-  S3til = cp.Variable((nx, ny))
-  S4til = cp.Variable((nx, nx))
+  S3til = cp.Variable((nx, nx))
+
+  Q1til = cp.Variable((nx, nx), symmetric=True)
   Q2til = cp.Variable((nx, nx))
-  Q3til = cp.Variable((nx, ny))
-  Q4til = cp.Variable((nx, nx))
+  Q3til = cp.Variable((nx, nx))
+
+  Mtil = cp.Variable((2 * nx, 2 * nx), symmetric=True)
+
+  # Decoupled ETM decision variables:
+  Ψsc_til = cp.Variable((ny, ny), symmetric=True)
+  Ξsc_til = cp.Variable((ny, ny), symmetric=True)
+
+  Ψca_til = cp.Variable((nx, nx), symmetric=True)
+  Ξca_til = cp.Variable((nx, nx), symmetric=True)
+
   Ytil = cp.Variable((2 * nx, dim_zeta))
   Ktil = cp.Variable((nu, nx))
-
-  # REMOVIDA A FLAG PSD=True. X1 e X2 são matrizes genéricas!
-  X1 = cp.Variable((nx, nx))
-  X2 = cp.Variable((ny, ny))
+  X = cp.Variable((nx, nx))
 
   # -------------------------------------------------------------------------
-  # 3. Construção dos Operadores Algébricos
+  # 4. Auxiliary Expressions & Finsler Multiplier
   # -------------------------------------------------------------------------
-  exp_lam_h = float(np.exp(lam * h))
-  Onx = np.zeros((nx, nx), dtype=dtype)
-  O_ny_2nx = np.zeros((ny, 2 * nx), dtype=dtype)
-
-  Rcal = cp.bmat([[Rtil, Onx], [Onx, 3.0 * Rtil]])
-  κ1 = np.vstack([e[2], e[5], e[6]])
-  κ2 = np.vstack([e[1] - e[2], e[1] + e[2] - 2.0 * e[3]])
-
   def He(expr):
     return expr + expr.T
 
-  # Componentes Λ1, Λ2, Λ3
-  Λ1 = (e[1] - e[2]).T @ S1til @ (e[1] - e[2]) + He(
-      (e[1] - e[2]).T @ (S2til @ e[2] + S3til @ e[5] + S4til @ e[6])
+  zero_nx = np.zeros((nx, nx), dtype=dtype)
+  Rcal = cp.bmat([
+      [Rtil, zero_nx],
+      [zero_nx, 3.0 * Rtil],
+  ])
+
+  Ftil = e[1].T + upsilon1 * e[2].T + \
+      upsilon2 * e[4].T + upsilon4 * e[4].T + e[6].T
+
+  Λ1 = (
+      e12.T @ S1til @ e12
+      + He(e12.T @ (S2til @ e[2] + S3til @ e[5]))
   )
 
   Λ2 = (
@@ -281,223 +366,180 @@ def synthesize_output_based_setm(
       + e[4].T @ Rtil @ e[4]
       - e[3].T @ Q1til @ e[3]
       + He(
-          (e[1] - e[2]).T @ S1til @ e[4]
-          + e[4].T @ (S2til @ e[2] + S3til @ e[5] + S4til @ e[6])
-          + e[1].T
-          @ (Q1til @ e[3] + Q2til @ e[2] + Q3til @ e[5] + Q4til @ e[6])
+          e12.T @ S1til @ e[4]
+          + e[4].T @ (S2til @ e[2] + S3til @ e[5])
+          + e[1].T @ (Q1til @ e[3] + Q2til @ e[2] + Q3til @ e[5])
       )
   )
 
   Λ3 = (
       e[3].T @ Q1til @ e[3]
       + κ1.T @ Mtil @ κ1
-      + He(e[3].T @ (Q2til @ e[2] + Q3til @ e[5] + Q4til @ e[6]))
+      + He(e[3].T @ (Q2til @ e[2] + Q3til @ e[5]))
   )
 
-  A_lam = A + lam * np.eye(nx, dtype=dtype)
-
-  Fx = e[1].T + upsilon1 * e[2].T + upsilon2 * e[4].T
-  Fy = e[5].T
-  Bzy = X2 @ e[5] - C @ X1 @ e[6]
-
-  # Decomposição Afim: Θ_0_bar, Θ_1_bar e Θ_2
+  # Base affine theta components
   theta0_bar = (
-      -e[5].T @ Ξtil @ e[5]
+      He(e[1].T @ Ptil @ e[4])
+      - e[6].T @ Ξsc_til @ e[6]
+      - e[5].T @ Ξca_til @ e[5]
       + h * Λ2
-      - (Λ1 + He(κ2.T @ Ytil))
-      + He(e[1].T @ Ptil @ e[4] +
-           Fx @ (A_lam @ X1 @ e[1] - X1 @ e[4]) +
-           Fy @ Bzy)
-  )
-  theta1_bar = -Λ2 - Λ3 - (1. / h) * e[6].T @ Sδtil @ e[6]
-  theta2 = He(Fx @ B @ Ktil @ (e[2] + e[6]))
-
-  Θbar_1 = theta0_bar + theta2
-  Θbar_2 = theta0_bar + h * theta1_bar + theta2
-  Θbar_3 = theta0_bar + h * theta1_bar + exp_lam_h * theta2
-
-  # -------------------------------------------------------------------------
-  # 4. Acoplamento de Schur nos 3 Vértices
-  # -------------------------------------------------------------------------
-  ΓeXC = e[2].T @ X1.T @ C.T  # shape: (dim_zeta, ny)
-
-  Γ1 = cp.bmat([[Θbar_1, ΓeXC],
-                [ΓeXC.T, -Ψtil]])
-
-  Γ2 = cp.bmat(
-      [
-          [Θbar_2, h * Ytil.T, ΓeXC],
-          [h * Ytil, - h * Rcal, np.zeros((2 * nx, ny))],
-          [ΓeXC.T, np.zeros((ny, 2 * nx)), -Ψtil],
-      ]
+      - Λ1
+      - He(Ytil.T @ κ2)
+      + He(Ftil @ (A_lambda @ X @ e[1] - X @ e[4]))
   )
 
-  Γ3 = cp.bmat(
-      [
-          [Θbar_3, h * Ytil.T, ΓeXC],
-          [h * Ytil, - h * Rcal, np.zeros((2 * nx, ny))],
-          [ΓeXC.T, np.zeros((ny, 2 * nx)), -Ψtil],
-      ]
-  )
+  theta1_bar = -Λ2 - Λ3
+  theta2 = He(Ftil @ B_bar @ Ktil @ (e[2] + e[5]))
+
+  # Vertex matrices (affine components)
+  Theta_bar_1 = theta0_bar + theta2
+  Theta_bar_2 = theta0_bar + h * theta1_bar + theta2
+  Theta_bar_3 = theta0_bar + h * theta1_bar + exp_lam_h * theta2
 
   # -------------------------------------------------------------------------
-  # 5. Restrições e Normalização de Escala (Gauge Fixing)
+  # 5. LMIs at Simplex Vertices (via Schur Complement)
+  # -------------------------------------------------------------------------
+  Γ_Psi_sc = e[2].T @ X.T @ J1.T  # (5nx+ny) x ny
+  Γ_Psi_ca = e[2].T               # (5nx+ny) x nx
+
+  zero_ny_nx = np.zeros((ny, nx), dtype=dtype)
+  zero_2nx_ny = np.zeros((2 * nx, ny), dtype=dtype)
+  zero_2nx_nx = np.zeros((2 * nx, nx), dtype=dtype)
+
+  Γ1 = cp.bmat([
+      [Theta_bar_1, Γ_Psi_sc, Γ_Psi_ca],
+      [Γ_Psi_sc.T, -Ψsc_til, zero_ny_nx],
+      [Γ_Psi_ca.T, zero_ny_nx.T, -Ψca_til],
+  ])
+
+  Γ2 = cp.bmat([
+      [Theta_bar_2, Ytil.T, Γ_Psi_sc, Γ_Psi_ca],
+      [Ytil, -(1.0 / h) * Rcal, zero_2nx_ny, zero_2nx_nx],
+      [Γ_Psi_sc.T, zero_2nx_ny.T, -Ψsc_til, zero_ny_nx],
+      [Γ_Psi_ca.T, zero_2nx_nx.T, zero_ny_nx.T, -Ψca_til],
+  ])
+
+  Γ3 = cp.bmat([
+      [Theta_bar_3, Ytil.T, Γ_Psi_sc, Γ_Psi_ca],
+      [Ytil, -(1.0 / h) * Rcal, zero_2nx_ny, zero_2nx_nx],
+      [Γ_Psi_sc.T, zero_2nx_ny.T, -Ψsc_til, zero_ny_nx],
+      [Γ_Psi_ca.T, zero_2nx_nx.T, zero_ny_nx.T, -Ψca_til],
+  ])
+
+  # -------------------------------------------------------------------------
+  # 6. Constraints & Optimization
   # -------------------------------------------------------------------------
   I_nx = np.eye(nx, dtype=dtype)
   I_ny = np.eye(ny, dtype=dtype)
 
   constraints = [
+      Ptil >> eps * I_nx,
+      Rtil >> eps * I_nx,
+
+      Ξsc_til >> eps * I_ny,
+      Ψsc_til >> eps * I_ny,
+
+      Ξca_til >> eps * I_nx,
+      Ψca_til >> eps * I_nx,
+
       Γ1 << -eps * np.eye(Γ1.shape[0], dtype=dtype),
       Γ2 << -eps * np.eye(Γ2.shape[0], dtype=dtype),
       Γ3 << -eps * np.eye(Γ3.shape[0], dtype=dtype),
-
-      # Limitações operacionais do ETM
-      Ξtil >> eps * I_ny,
-      Ψtil >> eps * I_ny,
-      Sδtil >> eps * I_ny
   ]
 
-  # -------------------------------------------------------------------------
-  # 6. Função Objetivo Focada em Desempenho
-  # -------------------------------------------------------------------------
-  # objective = cp.Minimize(cp.trace(Ξtil + Ψtil))
-  objective = cp.Minimize(0.0)
-
+  objective = cp.Minimize(cp.trace(Ψca_til + Ξca_til + Ψsc_til + Ξsc_til))
   problem = cp.Problem(objective, constraints)
 
+  # -------------------------------------------------------------------------
+  # 7. Solve
+  # -------------------------------------------------------------------------
   try:
-    problem.solve(solver=cp.MOSEK, verbose=verbose)
+    problem.solve(solver=solver, verbose=verbose)
   except Exception as err:
     if verbose:
-      print(f"[Solver Error] Falha na execução: {err}")
+      print(f"[Solver Error] Solver execution failed: {err}")
     return None
 
-  if problem.status not in (cp.OPTIMAL):
+  if problem.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
     if verbose:
-      print(f"[Solver Status] Não ótimo. Status: {problem.status}")
+      print(f"[Solver Status] Infeasible or Unbounded: {problem.status}")
     return None
 
   # -------------------------------------------------------------------------
-  # 7. Reconstrução das Variáveis Físicas
+  # 8. Variable Reconstruction
   # -------------------------------------------------------------------------
-  X1_val = np.asarray(X1.value, dtype=dtype)
-  X2_val = np.asarray(X2.value, dtype=dtype)
+  X_val = np.asarray(X.value, dtype=dtype)
 
-  X1inv = np.linalg.inv(X1_val)
-  X2inv = np.linalg.inv(X2_val)
-  X1invT = X1inv.T
-  X2invT = X2inv.T
+  try:
+    X_inv = np.linalg.inv(X_val)
+    Psisc_til_val = np.asarray(Ψsc_til.value, dtype=dtype)
+    Psi_sc_rec = np.linalg.inv(Psisc_til_val)
 
-  Ψtil_val = np.asarray(Ψtil.value, dtype=dtype)
-  Ξtil_val = np.asarray(Ξtil.value, dtype=dtype)
+    Psica_til_val = np.asarray(Ψca_til.value, dtype=dtype)
+    Psi_ca_rec = np.linalg.inv(Psica_til_val)
+  except np.linalg.LinAlgError:
+    if verbose:
+      print("[Recovery Error] Singular slack matrix X or Psi_til detected.")
+    return None
+
   Ktil_val = np.asarray(Ktil.value, dtype=dtype)
+  Xisc_til_val = np.asarray(Ξsc_til.value, dtype=dtype)
+  Xica_til_val = np.asarray(Ξca_til.value, dtype=dtype)
 
-  K_rec = Ktil_val @ X1inv
-  Xi_rec = X2invT @ Ξtil_val @ X2inv
-  Psi_rec = np.linalg.inv(Ψtil_val)
+  Ptil_val = np.asarray(Ptil.value, dtype=dtype)
+  Rtil_val = np.asarray(Rtil.value, dtype=dtype)
+
+  # Reconstruction formulas:
+  # K = K_tilde * X^{-1} * T
+  # Psi_sc = Psisc_til^{-1},  Xi_sc = Xisc_til
+  # Psi_ca = Psica_til^{-1},  Xi_ca = X^{-T} * Xica_til * X^{-1}
+  K_rec = Ktil_val @ X_inv @ T
+  Xi_sc_rec = Xisc_til_val
+  Xi_ca_rec = X_inv.T @ Xica_til_val @ X_inv
+
+  P_rec = X_inv.T @ Ptil_val @ X_inv
+  R_rec = X_inv.T @ Rtil_val @ X_inv
 
   return {
       "solver_status": problem.status,
       "optimal_value": problem.value,
-      "controller": {"K": K_rec},
+      "controller": {
+          "K": K_rec,
+          "Ktil": Ktil_val,
+      },
       "etm": {
-          "Ξ": Xi_rec,
-          "Ψ": Psi_rec,
+          "sc": {
+              "Psi": Psi_sc_rec,
+              "Xi": Xi_sc_rec,
+              "Psitil": Psisc_til_val,
+              "Xitil": Xisc_til_val,
+          },
+          "ca": {
+              "Psi": Psi_ca_rec,
+              "Xi": Xi_ca_rec,
+              "Psitil": Psica_til_val,
+              "Xitil": Xica_til_val,
+          },
       },
       "functional": {
-          "P": X1invT @ np.asarray(Ptil.value, dtype=dtype) @ X1inv,
-          "R": X1invT @ np.asarray(Rtil.value, dtype=dtype) @ X1inv,
+          "P": P_rec,
+          "R": R_rec,
       },
       "slacks": {
-          "X1": X1_val,
-          "X2": X2_val,
+          "X": X_val,
+      },
+      "transformed": {
+          "Ptil": Ptil_val,
+          "Rtil": Rtil_val,
+          "A_bar": A_bar,
+          "B_bar": B_bar,
+          "T": T,
       },
   }
 
 
-# =============================================================================
-# 1. Definições das Funções de Síntese
-# =============================================================================
-
-def synthesize_observer_clock_calibrated(
-    design_params: Dict[str, Any],
-    eps: float = 1e-6,
-    solver: str = cp.MOSEK,
-    verbose: bool = False,
-    dtype: np.dtype = np.float64,
-) -> Optional[Dict[str, Any]]:
-  """Síntese via Funcional com Dependência do Relógio (Clock-Dependent)."""
-  A = np.asarray(design_params["A"], dtype=dtype)
-  C = np.asarray(design_params["C"], dtype=dtype)
-  h = float(design_params["h"])
-  nu_max = float(design_params.get(
-      "nu_max", design_params.get("nu_bar", 1.0)))
-
-  eig_max = np.max(np.real(np.linalg.eigvals(A)))
-  alpha = float(design_params.get("alpha", max(0.0, eig_max + 0.1)))
-  rho = float(design_params.get("rho", 0.85))
-
-  nx, ny = A.shape[0], C.shape[0]
-  I_nx, I_ny = np.eye(nx, dtype=dtype), np.eye(ny, dtype=dtype)
-
-  P0 = cp.Variable((nx, nx), symmetric=True)
-  P1 = cp.Variable((nx, nx), symmetric=True)
-  X = cp.Variable((nx, nx))
-  Y = cp.Variable((nx, ny))
-  gamma_L = cp.Variable(nonneg=True)
-
-  def build_psi(tau_val: float):
-    P_tau = P0 + tau_val * P1
-    return cp.bmat([
-        [-rho * P_tau, (X - Y @ C).T],
-        [X - Y @ C, P0 - (X + X.T)]
-    ])
-
-  P_numax = P0 + nu_max * P1
-  flow_0 = P1 + A.T @ P0 + P0 @ A - 2.0 * alpha * P0
-  flow_numax = P1 + A.T @ P_numax + P_numax @ A - 2.0 * alpha * P_numax
-
-  schur_gamma = cp.bmat([
-      [gamma_L * I_ny, Y.T],
-      [Y, I_nx]
-  ])
-
-  constraints = [
-      P0 - I_nx >> eps * I_nx,
-      P_numax >> eps * I_nx,
-      flow_0 << -eps * I_nx,
-      flow_numax << -eps * I_nx,
-      build_psi(h) << -eps * np.eye(2 * nx, dtype=dtype),
-      build_psi(nu_max) << -eps * np.eye(2 * nx, dtype=dtype),
-      schur_gamma >> 0,
-      X + X.T >> eps * I_nx
-  ]
-
-  problem = cp.Problem(cp.Minimize(gamma_L), constraints)
-  try:
-    problem.solve(solver=solver, verbose=verbose)
-  except Exception:
-    return None
-
-  if problem.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
-    return None
-
-  X_val = np.asarray(X.value, dtype=dtype)
-  Y_val = np.asarray(Y.value, dtype=dtype)
-  L_rec = np.linalg.inv(X_val) @ Y_val
-
-  return {
-      "L": L_rec,
-      "gamma_L": float(gamma_L.value),
-      "P0": np.asarray(P0.value, dtype=dtype),
-      "P1": np.asarray(P1.value, dtype=dtype),
-      "alpha": alpha,
-      "rho": rho,
-      "decay_factor": rho * np.exp(2.0 * alpha * nu_max)
-  }
-
-
-def synthesize_impulsive_observer_discrete_exact(
+def synthesize_impulsive_observer(
     design_params: Dict[str, Any],
     eps: float = 1e-6,
     solver: str = cp.MOSEK,

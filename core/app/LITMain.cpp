@@ -85,7 +85,7 @@ void run_closed_loop_setm_simulation(PeriodicETC::LITEngine &engine)
   fs::create_directories(dir);
 
   BinaryLogger::dump(dir / "time.bin", result.time_data);
-  BinaryLogger::dump(dir / "trigger_times.bin", result.trigger_times);
+  BinaryLogger::dump(dir / "trigger_times.bin", result.sc_trigger_times);
 
   int num_steps = static_cast<int>(result.time_data.size());
 
@@ -111,25 +111,25 @@ void run_closed_loop_setm_simulation(PeriodicETC::LITEngine &engine)
   }
 
   std::cout << "Closed-loop SETM simulation completed. Data saved in: " << dir
-            << " | Total triggers: " << result.trigger_times.size() << std::endl;
+            << " | Total triggers: " << result.sc_trigger_times.size() << std::endl;
 }
 
 void run_closed_loop_setm_event_map_simulation(PeriodicETC::LITEngine &engine)
 {
   double duration = 30.0;
   double time_step = 1e-4;
-  double sampling_period = 1e-2;
+  double sampling_period = 1e-1;
 
   int state_dim = engine.getStateDim();
   Vector x0(state_dim);
   x0[0] = 1.0;
   x0[1] = -1.0;
 
-  Matrix K(1, 2, {1.93e+00, -2.59e+00});
-  Matrix L(2, 1, {-2.77e-01, 5.72e-01});
+  Matrix K(1, 2, {9.96e-01, -2.39e+00});
+  Matrix L(2, 1, {-2.16e-01, 9.98e-01});
   // Matrix L(2, 2, {1.0, 0.0, 0.0, 1.0});
-  Matrix Xi(1, 1, {7.98e+00});
-  Matrix Psi(1, 1, {6.23e-01});
+  Matrix Xi(1, 1, {2.00e+00});
+  Matrix Psi(1, 1, {1.86e+04});
 
   PeriodicETC::LIT_SETM::StaticETMConfig etm_config;
   etm_config.sigma = 1.0;
@@ -145,7 +145,7 @@ void run_closed_loop_setm_event_map_simulation(PeriodicETC::LITEngine &engine)
   fs::create_directories(dir);
 
   BinaryLogger::dump(dir / "time.bin", result.time_data);
-  BinaryLogger::dump(dir / "trigger_times.bin", result.trigger_times);
+  BinaryLogger::dump(dir / "trigger_times.bin", result.sc_trigger_times);
 
   int num_steps = static_cast<int>(result.time_data.size());
 
@@ -195,13 +195,153 @@ void run_closed_loop_setm_event_map_simulation(PeriodicETC::LITEngine &engine)
   }
 
   std::cout << "Closed-loop SETM (Event Map) simulation completed. Data saved in: " << dir
-            << " | Total triggers: " << result.trigger_times.size() << std::endl;
+            << " | Total triggers: " << result.sc_trigger_times.size() << std::endl;
+}
+
+void run_dual_channel_closed_loop_setm_simulation(PeriodicETC::LITEngine &engine)
+{
+  using Algebra::Matrix;
+  using Algebra::Vector;
+  namespace fs = std::filesystem;
+
+  // ------------------------------------------------------------------
+  // 1. Parâmetros Temporais
+  // ------------------------------------------------------------------
+  const double duration = 30.0;
+  const double time_step = 1e-4;
+  const double sampling_period = 5e-2;
+
+  // ------------------------------------------------------------------
+  // 2. Dimensões e Condições Iniciais
+  // ------------------------------------------------------------------
+  const int state_dim = engine.getStateDim();
+  const int input_dim = 1;
+  const double max_iet = 0.7;
+
+  Vector x0(state_dim);
+  x0[0] = 1.0;
+  x0[1] = -1.0;
+
+  Vector x_hat0(state_dim);
+  x_hat0[0] = 0.0;
+  x_hat0[1] = 0.0;
+
+  // ------------------------------------------------------------------
+  // 3. Ganhos de Realimentação e Observação
+  // ------------------------------------------------------------------
+  Matrix K(1, 2, {-1.95e+01, -9.52e+00});
+  Matrix L(2, 1, {9.25e-01, 1.79e+00});
+
+  // ------------------------------------------------------------------
+  // 4. Configuração do ETM Sensor-Controlador (Canal SC: n_y = 1)
+  // ------------------------------------------------------------------
+  Matrix Xi_sc(1, 1, {6.44e+00});
+  Matrix Psi_sc(1, 1, {1.02e+00});
+
+  PeriodicETC::LIT_SETM::StaticETMConfig etm_sc_config;
+  etm_sc_config.sigma = 1.0;
+  etm_sc_config.threshold = 0.0;
+  etm_sc_config.Psi = Psi_sc;
+  etm_sc_config.Xi = Xi_sc;
+
+  // ------------------------------------------------------------------
+  // 5. Configuração do ETM Controlador-Atuador (Canal CA: n_x = 2)
+  // ------------------------------------------------------------------
+  Matrix Xi_ca(2, 2, {2.17e+03, -9.79e+02, -9.79e+02, 4.42e+02});
+  Matrix Psi_ca(2, 2, {6.59e-01, 1.33e+00, 1.33e+00, 2.94e+00});
+
+  PeriodicETC::LIT_SETM::StaticETMConfig etm_ca_config;
+  etm_ca_config.sigma = 1.0;
+  etm_ca_config.threshold = 0.0;
+  etm_ca_config.Psi = Psi_ca;
+  etm_ca_config.Xi = Xi_ca;
+
+  // ------------------------------------------------------------------
+  // 6. Execução da Simulação em Malha Fechada
+  // ------------------------------------------------------------------
+  auto result = engine.runDualChannelClosedLoopExtended(
+      x0, x_hat0, K, L,
+      etm_sc_config, etm_ca_config,
+      sampling_period, duration, time_step,
+      "DUAL_CHANNEL_SETM",
+      std::nullopt, max_iet);
+
+  // ------------------------------------------------------------------
+  // 7. Exportação dos Dados Binários
+  // ------------------------------------------------------------------
+  fs::path dir = "simulations/lit-system-dual-channel-setm";
+  fs::create_directories(dir);
+
+  BinaryLogger::dump(dir / "time.bin", result.time_data);
+  BinaryLogger::dump(dir / "sc_trigger_times.bin", result.sc_trigger_times);
+  BinaryLogger::dump(dir / "ca_trigger_times.bin", result.ca_trigger_times);
+
+  const int num_steps = static_cast<int>(result.time_data.size());
+
+  // (a) Estados reais da planta (x1.bin, x2.bin, ...)
+  for (int i = 0; i < state_dim; ++i)
+  {
+    std::vector<double> state_trajectory;
+    state_trajectory.reserve(num_steps);
+    for (int step = 0; step < num_steps; ++step)
+      state_trajectory.push_back(result.states_data[step * state_dim + i]);
+    BinaryLogger::dump(dir / ("x" + std::to_string(i + 1) + ".bin"), state_trajectory);
+  }
+
+  // (b) Estados estimados pelo observador (x_est1.bin, x_est2.bin, ...)
+  for (int i = 0; i < state_dim; ++i)
+  {
+    std::vector<double> est_state_trajectory;
+    est_state_trajectory.reserve(num_steps);
+    for (int step = 0; step < num_steps; ++step)
+      est_state_trajectory.push_back(result.estimated_states_data[step * state_dim + i]);
+    BinaryLogger::dump(dir / ("x_est" + std::to_string(i + 1) + ".bin"), est_state_trajectory);
+  }
+
+  // (c) Erro de estimação de estados (e1.bin, e2.bin, ...)
+  for (int i = 0; i < state_dim; ++i)
+  {
+    std::vector<double> error_trajectory;
+    error_trajectory.reserve(num_steps);
+    for (int step = 0; step < num_steps; ++step)
+      error_trajectory.push_back(result.estimation_error_data[step * state_dim + i]);
+    BinaryLogger::dump(dir / ("e" + std::to_string(i + 1) + ".bin"), error_trajectory);
+  }
+
+  // (d) Sinal de controle aplicado pelo atuador ZOH (u1.bin, ...)
+  for (int i = 0; i < input_dim; ++i)
+  {
+    std::vector<double> control_trajectory;
+    control_trajectory.reserve(num_steps);
+    for (int step = 0; step < num_steps; ++step)
+      control_trajectory.push_back(result.control_data[step * input_dim + i]);
+    BinaryLogger::dump(dir / ("u" + std::to_string(i + 1) + ".bin"), control_trajectory);
+  }
+
+  // ------------------------------------------------------------------
+  // 8. Relatório da Simulação
+  // ------------------------------------------------------------------
+  const double total_samples = duration / sampling_period;
+  const double sc_reduction = (1.0 - static_cast<double>(result.sc_trigger_times.size()) / total_samples) * 100.0;
+  const double ca_reduction = (1.0 - static_cast<double>(result.ca_trigger_times.size()) / total_samples) * 100.0;
+
+  std::cout << "\n======================================================\n"
+            << "Simulação Dual-Channel SETM Concluída com Sucesso\n"
+            << "Diretório de saída: " << dir << "\n"
+            << "------------------------------------------------------\n"
+            << "Total de amostras periódicas : " << static_cast<int>(total_samples) << "\n"
+            << "Disparos no canal SC (Sensor) : " << result.sc_trigger_times.size()
+            << " (Redução: " << sc_reduction << "%)\n"
+            << "Disparos no canal CA (Atuador): " << result.ca_trigger_times.size()
+            << " (Redução: " << ca_reduction << "%)\n"
+            << "======================================================\n"
+            << std::endl;
 }
 
 int main()
 {
   std::string systems_directory = "../experiments/data/";
-  fs::path jsonPath = systems_directory + "sys-01.json";
+  fs::path jsonPath = systems_directory + "sys-03.json";
 
   try
   {
@@ -223,7 +363,8 @@ int main()
 
     // run_open_loop_simulation(engine);
     // run_closed_loop_setm_simulation(engine);
-    run_closed_loop_setm_event_map_simulation(engine);
+    // run_closed_loop_setm_event_map_simulation(engine);
+    run_dual_channel_closed_loop_setm_simulation(engine);
   }
   catch (const std::exception &ex)
   {

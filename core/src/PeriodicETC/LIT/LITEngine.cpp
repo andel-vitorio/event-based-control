@@ -95,6 +95,46 @@ namespace PeriodicETC
     throw std::invalid_argument("Unknown extended closed-loop type: " + type);
   }
 
+  LIT_SETM::ExtendedClosedLoopResult LITEngine::runDualChannelClosedLoopExtended(
+      const Algebra::Vector &x0,
+      const Algebra::Vector &x_hat0,
+      const Algebra::Matrix &K,
+      const Algebra::Matrix &L,
+      const LIT_SETM::StaticETMConfig &etm_sc_config,
+      const LIT_SETM::StaticETMConfig &etm_ca_config,
+      double sampling_period,
+      double duration,
+      double time_step,
+      const std::string &type,
+      std::optional<Algebra::Vector> w,
+      double max_iet)
+  {
+    if (!system_loaded || !plant)
+    {
+      throw std::runtime_error(
+          "No LIT system loaded. Please load a system before running closed-loop simulation.");
+    }
+
+    if (type == "DUAL_CHANNEL_SETM" || type == "SETM_EVENT_MAP" || type == "EVENT_MAP")
+    {
+      return LIT_SETM::run_dual_channel_observer_petc_simulation(
+          *plant,
+          x0,
+          x_hat0,
+          K,
+          L,
+          etm_sc_config,
+          etm_ca_config,
+          sampling_period,
+          duration,
+          time_step,
+          w,
+          max_iet);
+    }
+
+    throw std::invalid_argument("Unknown extended closed-loop type: " + type);
+  }
+
   ControlSystems::LITSystem *LITEngine::getPlant() const
   {
     return plant.get();
