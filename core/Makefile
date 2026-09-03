@@ -109,7 +109,7 @@ $(DLL_DIR)/$(notdir $(basename $(1))).dll: \
 $(OBJ_DIR)/$(patsubst %.cpp,%.o,$(1)) \
 $$(CORE_OBJS)
 
-	@mkdir -p dll
+	@mkdir dll
 	
 	@echo Linking $$@
 	$$(CXX) -shared $$^ \

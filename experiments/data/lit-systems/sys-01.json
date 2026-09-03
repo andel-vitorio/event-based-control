@@ -16,32 +16,17 @@
   },
   "states": {
     "x1": {
-      "name": "Posição Angular",
+      "name": "Estado $x_1(t)$",
       "symbol": "$x_1$",
       "unit": ""
     },
     "x2": {
-      "name": "Velocidade Angular",
+      "name": "Estado $x_2(t)$",
       "symbol": "$x_2$",
       "unit": ""
     }
   },
-  "parameters": {
-    "p1": {
-      "name": "Parâmetro $p(t)$",
-      "symbol": "$p$",
-      "unit": "",
-      "value": ".5 * cos(t)"
-    }
-  },
-  "disturbances": {
-    "w1": {
-      "name": "Distúrbio $w(t)$",
-      "symbol": "$w$",
-      "unit": "",
-      "value": "1 * exp(-2.25 * t) * sin(2.0 * PI * t)"
-    }
-  },
+  "disturbances": {},
   "inputs": {
     "u1": {
       "name": "Entrada $u(t)$",
@@ -52,13 +37,8 @@
   "performance_outputs": null,
   "outputs": {
     "y1": {
-      "name": "Posição Angular",
-      "symbol": "$x_1$",
-      "unit": ""
-    },
-    "y2": {
-      "name": "Velocidade Angular",
-      "symbol": "$x_2$",
+      "name": "Saída $y_1(t)$",
+      "symbol": "$y_1$",
       "unit": ""
     }
   }
