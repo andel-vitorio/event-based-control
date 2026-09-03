@@ -488,7 +488,7 @@ namespace PeriodicETC
       return result;
     }
 
-    ExtendedClosedLoopResult run_dual_channel_augmented_observer_petc_simulation(
+    ExtendedClosedLoopResult run_dual_channel_observer_petc_simulation(
         ControlSystems::LITSystem &plant,
         const Algebra::Vector &x0,
         const Algebra::Vector &x_hat0,
@@ -509,9 +509,6 @@ namespace PeriodicETC
       using Algebra::Matrix;
       using Algebra::Vector;
 
-      // ------------------------------------------------------------------
-      // 1. Grade Temporal e Dimensões do Sistema
-      // ------------------------------------------------------------------
       const auto timepts = Algebra::arange(0.0, duration, time_step);
       const std::size_t num_steps = timepts.size();
 
@@ -519,9 +516,6 @@ namespace PeriodicETC
       const int output_dim = static_cast<int>(plant.outputs());
       const int input_dim = static_cast<int>(plant.inputs());
 
-      // ------------------------------------------------------------------
-      // 2. Alocação e Pré-Reserva de Memória
-      // ------------------------------------------------------------------
       ExtendedClosedLoopResult result;
       result.time_data = timepts;
       result.states_data.reserve(num_steps * state_dim);
@@ -531,31 +525,16 @@ namespace PeriodicETC
       result.sc_trigger_times.reserve(num_steps / 2);
       result.ca_trigger_times.reserve(num_steps / 2);
 
-      // ------------------------------------------------------------------
-      // 3. Tratamento de Perturbação Externa
-      // ------------------------------------------------------------------
       const Vector actual_w = w.has_value() ? *w : Vector(0);
 
-      // ------------------------------------------------------------------
-      // 4. Mecanismos ETM Desacoplados (SC e CA) e Amostrador Periódico
-      // ------------------------------------------------------------------
       StaticETM etm_sc(etm_sc_config, output_dim);
       StaticETM etm_ca(etm_ca_config, state_dim);
       Sampler sampler(sampling_period, 0.0);
 
-      // ------------------------------------------------------------------
-      // 5. Matrizes da Planta
-      // ------------------------------------------------------------------
       const Matrix A = plant.getA();
       const Matrix B = plant.getB();
       const Matrix C = plant.getC();
 
-      // ------------------------------------------------------------------
-      // 6. Dinâmica Contínua Aumentada: z = [x; \hat{x}; \hat{x}_a] (Dimensão: 3 * nx)
-      //    \dot{x}       = A x + B u + w
-      //    \dot{\hat{x}}   = A \hat{x} + B u + L0 (\hat{x} - \hat{x}_a)
-      //    \dot{\hat{x}}_a = A \hat{x}_a + B u + L2 (C \hat{x} - C \hat{x}_a)
-      // ------------------------------------------------------------------
       EDOSolvers::RK5 solver(
           [&plant, &A, &B, &C, &L0, &L2, state_dim, input_dim](
               double /* t */,
@@ -565,28 +544,17 @@ namespace PeriodicETC
             const Vector x_sys = z_sys.slice(0, state_dim);
             const Vector x_est = z_sys.slice(state_dim, 2 * state_dim);
             const Vector x_est_a = z_sys.slice(2 * state_dim, 3 * state_dim);
-
             const Vector u = signal.slice(0, input_dim);
             const Vector disturbance = signal.slice(input_dim, signal.size());
-
             const Vector x_dot = plant.stateDerivative(x_sys, u, disturbance);
             const Vector Bu = B * u;
-
-            // Discrepância local entre observador principal e auxiliar
             const Vector delta_x_est = x_est - x_est_a;
-
-            // Observador Principal: amortecimento interno via L0
             const Vector x_est_dot = A * x_est + Bu + L0 * delta_x_est;
-
-            // Observador Auxiliar: injeção contínua sobre a saída virtual local C * \hat{x}
             const Vector x_est_a_dot = A * x_est_a + Bu + L2 * (C * delta_x_est);
 
             return Vector::concatenate(x_dot, Vector::concatenate(x_est_dot, x_est_a_dot));
           });
 
-      // ------------------------------------------------------------------
-      // 7. Condições Iniciais e Memórias de Transmissão ZOH
-      // ------------------------------------------------------------------
       Vector x = x0;
       Vector x_est = x_hat0;
       Vector x_est_a = x_hat_a0;
@@ -599,45 +567,30 @@ namespace PeriodicETC
       double last_sc_trigger = 0.0;
       double last_ca_trigger = 0.0;
 
-      // ------------------------------------------------------------------
-      // 8. Laço Principal de Simulação
-      // ------------------------------------------------------------------
       for (std::size_t i = 0; i < num_steps; ++i)
       {
         const double t = timepts[i];
 
-        // Extração dos estados contínuos no instante t
         x = z.slice(0, state_dim);
         x_est = z.slice(state_dim, 2 * state_dim);
         x_est_a = z.slice(2 * state_dim, 3 * state_dim);
 
         const Vector y = C * x;
 
-        // Avaliação Periódica nos Instantes de Amostragem s_m
         if (i == 0)
         {
-          // Inicialização síncrona no instante t = 0
           result.sc_trigger_times.push_back(t);
           result.ca_trigger_times.push_back(t);
           last_sc_trigger = t;
           last_ca_trigger = t;
-
           y_r_sc = y;
-
-          // Salto impulsivo no observador principal:
-          // \hat{x}(0^+) = \hat{x}(0^-) + L1 * (y(0) - C * \hat{x}(0^-))
-          // Observador auxiliar permanece contínuo: \hat{x}_a(0^+) = \hat{x}_a(0^-)
           x_est = x_est + L1 * (y - C * x_est);
           x_r_ca = x_est;
-
           z = Vector::concatenate(x, Vector::concatenate(x_est, x_est_a));
           u_actual = K * x_r_ca;
         }
         else if (sampler.shouldSample(t))
         {
-          // --------------------------------------------------------------
-          // (a) Avaliação do Canal Sensor-Controlador (SC)
-          // --------------------------------------------------------------
           const bool sc_event = etm_sc.evaluateEvent(y, y_r_sc);
           const bool sc_timeout = (t - last_sc_trigger >= max_iet_sc - 1e-9);
 
@@ -646,18 +599,10 @@ namespace PeriodicETC
             y_r_sc = y;
             last_sc_trigger = t;
             result.sc_trigger_times.push_back(t);
-
-            // Salto discreto apenas no estimador principal:
-            // \hat{x}(t_k^{sc+}) = \hat{x}(t_k^{sc-}) + L1 * (y[t_k^{sc}] - C * \hat{x}(t_k^{sc-}))
-            // O estimador auxiliar x_est_a não sofre descontinuidade impulsiva
             x_est = x_est + L1 * (y - C * x_est);
             z = Vector::concatenate(x, Vector::concatenate(x_est, x_est_a));
           }
 
-          // --------------------------------------------------------------
-          // (b) Avaliação do Canal Controlador-Atuador (CA)
-          // --------------------------------------------------------------
-          // ETM-CA monitora o estado do estimador principal \hat{x}
           const bool ca_event = etm_ca.evaluateEvent(x_est, x_r_ca);
           const bool ca_timeout = (t - last_ca_trigger >= max_iet_ca - 1e-9);
 
@@ -666,17 +611,11 @@ namespace PeriodicETC
             x_r_ca = x_est;
             last_ca_trigger = t;
             result.ca_trigger_times.push_back(t);
-
-            // Atualização do sinal de controle ZOH: u(t) = K * \hat{x}(t_\ell^{ca})
             u_actual = K * x_r_ca;
           }
         }
 
-        // ------------------------------------------------------------------
-        // 9. Registro de Telemetria
-        // ------------------------------------------------------------------
         const Vector estimation_error = x - x_est;
-
         for (int j = 0; j < state_dim; ++j)
         {
           result.states_data.push_back(x[j]);
@@ -685,13 +624,8 @@ namespace PeriodicETC
         }
 
         for (int j = 0; j < input_dim; ++j)
-        {
           result.control_data.push_back(u_actual[j]);
-        }
 
-        // ------------------------------------------------------------------
-        // 10. Integração Numérica Contínua no Intervalo [t, t + dt]
-        // ------------------------------------------------------------------
         if (i + 1 < num_steps)
         {
           const Vector signal = Vector::concatenate(u_actual, actual_w);

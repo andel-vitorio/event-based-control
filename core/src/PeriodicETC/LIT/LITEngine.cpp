@@ -12,7 +12,9 @@ namespace PeriodicETC
     using namespace ControlSystems;
     StateSystemModel model = StateSystemParser::parseFromFile(json_path);
     plant = std::make_unique<LITSystem>(LITSystem::fromModel(model));
-    state_dim = static_cast<int>(model.states.size());
+    state_dim = static_cast<size_t>(model.states.size());
+    input_dim = static_cast<size_t>(model.inputs.size());
+    output_dim = static_cast<size_t>(model.outputs.size());
     if (state_dim == 0)
     {
       throw std::runtime_error("The loaded system has zero states. Please check the JSON file: " + json_path);
@@ -25,9 +27,19 @@ namespace PeriodicETC
     return system_loaded;
   }
 
-  int LITEngine::getStateDim() const
+  size_t LITEngine::getStateDim() const
   {
     return state_dim;
+  }
+
+  size_t LITEngine::getInputDim() const
+  {
+    return input_dim;
+  }
+
+  size_t LITEngine::getOutputDim() const
+  {
+    return output_dim;
   }
 
   LIT::OpenLoopResult LITEngine::runOpenLoop(
@@ -218,7 +230,7 @@ namespace PeriodicETC
     // -------------------------------------------------------------------------
     if (type == "DUAL_CHANNEL_SETM" || type == "SETM_EVENT_MAP" || type == "EVENT_MAP")
     {
-      return LIT_SETM::run_dual_channel_augmented_observer_petc_simulation(
+      return LIT_SETM::run_dual_channel_observer_petc_simulation(
           *plant,
           x0,
           x_hat0,

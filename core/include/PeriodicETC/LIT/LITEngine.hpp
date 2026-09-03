@@ -15,7 +15,9 @@ namespace PeriodicETC
   private:
     std::unique_ptr<ControlSystems::LITSystem> plant;
     bool system_loaded;
-    int state_dim;
+    size_t state_dim;
+    size_t input_dim;
+    size_t output_dim;
 
   public:
     LITEngine();
@@ -23,7 +25,9 @@ namespace PeriodicETC
 
     void loadSystem(const std::string &json_path);
     bool isSystemLoaded() const;
-    int getStateDim() const;
+    size_t getStateDim() const;
+    size_t getInputDim() const;
+    size_t getOutputDim() const;
 
     ControlSystems::LITSystem *getPlant() const;
 

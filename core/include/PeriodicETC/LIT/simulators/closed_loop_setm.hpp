@@ -64,7 +64,7 @@ namespace PeriodicETC
         double max_iet_sc = std::numeric_limits<double>::infinity(),
         double max_iet_ca = std::numeric_limits<double>::infinity());
 
-    ExtendedClosedLoopResult run_dual_channel_augmented_observer_petc_simulation(
+    ExtendedClosedLoopResult run_dual_channel_observer_petc_simulation(
         ControlSystems::LITSystem &plant,
         const Algebra::Vector &x0,
         const Algebra::Vector &x_hat0,
