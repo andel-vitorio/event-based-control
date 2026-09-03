@@ -49,7 +49,7 @@ namespace PeriodicETC
         double time_step,
         std::optional<Algebra::Vector> w = std::nullopt);
 
-    ExtendedClosedLoopResult run_dual_channel_observer_petc_simulation(
+    ExtendedClosedLoopResult run_dual_channel_observer_petc_simulation_old(
         ControlSystems::LITSystem &plant,
         const Algebra::Vector &x0,
         const Algebra::Vector &x_hat0,
@@ -61,7 +61,26 @@ namespace PeriodicETC
         double duration,
         double time_step,
         std::optional<Algebra::Vector> w = std::nullopt,
-        double max_iet = std::numeric_limits<double>::infinity());
+        double max_iet_sc = std::numeric_limits<double>::infinity(),
+        double max_iet_ca = std::numeric_limits<double>::infinity());
+
+    ExtendedClosedLoopResult run_dual_channel_augmented_observer_petc_simulation(
+        ControlSystems::LITSystem &plant,
+        const Algebra::Vector &x0,
+        const Algebra::Vector &x_hat0,
+        const Algebra::Vector &x_hat_a0,
+        const Algebra::Matrix &K,
+        const Algebra::Matrix &L0,
+        const Algebra::Matrix &L1,
+        const Algebra::Matrix &L2,
+        const StaticETMConfig &etm_sc_config,
+        const StaticETMConfig &etm_ca_config,
+        double sampling_period,
+        double duration,
+        double time_step,
+        std::optional<Algebra::Vector> w = std::nullopt,
+        double max_iet_sc = std::numeric_limits<double>::infinity(),
+        double max_iet_ca = std::numeric_limits<double>::infinity());
 
   } // namespace LIT_SETM
 } // namespace PeriodicETC
