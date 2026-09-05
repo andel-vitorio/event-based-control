@@ -740,6 +740,279 @@ void run_observer_petc_under_attack_simulation(PeriodicETC::LITEngine &engine)
       << std::endl;
 }
 
+void run_observer_petc_under_attack_simulation_2(PeriodicETC::LITEngine &engine)
+{
+  using Algebra::Matrix;
+  using Algebra::Vector;
+  namespace fs = std::filesystem;
+
+  const double duration = 10.0;
+  const double time_step = 1e-4;
+  const double sampling_period = 1e-1;
+
+  const int state_dim = static_cast<int>(engine.getStateDim());
+  const int output_dim = static_cast<int>(engine.getOutputDim());
+  const int input_dim = static_cast<int>(engine.getInputDim());
+
+  const double max_iet_sc = 5.0 * sampling_period;
+  const double max_iet_ca = 10.0;
+
+  // -------------------------------------------------------------------------
+  // Configuração do Detector Adaptativo Baseado em Zonotopos
+  // -------------------------------------------------------------------------
+  Vector tilde_x0(state_dim);
+  tilde_x0[0] = 0.05;
+  tilde_x0[1] = 0.05;
+  const double epsilon_floor = 1e-5;
+
+  Vector x0(state_dim);
+  x0[0] = -1.0;
+  x0[1] = 1.0;
+
+  Vector x_hat0(state_dim);
+  x_hat0[0] = 0.0;
+  x_hat0[1] = 0.0;
+
+  Vector x_hat_a0(state_dim);
+  x_hat_a0[0] = 0.0;
+  x_hat_a0[1] = 0.0;
+
+  Matrix K(1, 2, {1.39e+00, -3.38e+00});
+  Matrix L0(2, 2, {0.00e+00, 0.00e+00, 0.00e+00, -1.50e+00});
+  Matrix L1(2, 1, {9.83e-01, -1.13e-01});
+  Matrix L2(2, 1, {8.40e+00, 2.46e+01});
+
+  Matrix Xi_sc(1, 1, {8.66e-01});
+  Matrix Psi_sc(1, 1, {1.13e+00});
+
+  PeriodicETC::LIT_SETM::StaticETMConfig etm_sc_config;
+  etm_sc_config.sigma = 1.0;
+  etm_sc_config.threshold = 0.0;
+  etm_sc_config.Psi = Psi_sc;
+  etm_sc_config.Xi = Xi_sc;
+
+  Matrix Xi_ca(2, 2, {2.73e+05, -5.26e+05, -5.26e+05, 1.30e+06});
+  Matrix Psi_ca(2, 2, {1.13e+05, 2.74e+04, 2.74e+04, 1.38e+05});
+
+  PeriodicETC::LIT_SETM::StaticETMConfig etm_ca_config;
+  etm_ca_config.sigma = 1.0;
+  etm_ca_config.threshold = 0.0;
+  etm_ca_config.Psi = Psi_ca;
+  etm_ca_config.Xi = Xi_ca;
+
+  TemporaryOutputNoise attack_noise(
+      output_dim, 5.0, 6.0, 0.1, TemporaryOutputNoise::Type::BIAS);
+
+  auto result = engine.runDualChannelUnderAttackClosedLoop(
+      x0, x_hat0, x_hat_a0, tilde_x0, K, L0, L1, L2,
+      etm_sc_config, etm_ca_config,
+      sampling_period, duration, time_step,
+      "DUAL_CHANNEL_ATTACK",
+      std::nullopt, max_iet_sc, max_iet_ca,
+      attack_noise, epsilon_floor);
+
+  fs::path dir = "simulations/lit-system-dual-channel-under-attack";
+  fs::create_directories(dir);
+
+  const int num_steps = static_cast<int>(result.time_data.size());
+  const std::size_t sc_transmissions = result.sc_trigger_times.size();
+
+  BinaryLogger::dump(dir / "time.bin", result.time_data);
+  BinaryLogger::dump(dir / "sc_trigger_times.bin", result.sc_trigger_times);
+  BinaryLogger::dump(dir / "ca_trigger_times.bin", result.ca_trigger_times);
+  BinaryLogger::dump(dir / "residual_norm.bin", result.residual_norm);
+
+  for (int i = 0; i < state_dim; ++i)
+  {
+    std::vector<double> traj;
+    traj.reserve(num_steps);
+    for (int step = 0; step < num_steps; ++step)
+      traj.push_back(result.states_data[step * state_dim + i]);
+    BinaryLogger::dump(dir / ("x" + std::to_string(i + 1) + ".bin"), traj);
+  }
+
+  for (int i = 0; i < state_dim; ++i)
+  {
+    std::vector<double> traj;
+    traj.reserve(num_steps);
+    for (int step = 0; step < num_steps; ++step)
+      traj.push_back(result.estimated_states_data[step * state_dim + i]);
+    BinaryLogger::dump(dir / ("x_est" + std::to_string(i + 1) + ".bin"), traj);
+  }
+
+  for (int i = 0; i < state_dim; ++i)
+  {
+    std::vector<double> traj;
+    traj.reserve(num_steps);
+    for (int step = 0; step < num_steps; ++step)
+      traj.push_back(result.estimation_error_data[step * state_dim + i]);
+    BinaryLogger::dump(dir / ("e" + std::to_string(i + 1) + ".bin"), traj);
+  }
+
+  for (int i = 0; i < input_dim; ++i)
+  {
+    std::vector<double> traj;
+    traj.reserve(num_steps);
+    for (int step = 0; step < num_steps; ++step)
+      traj.push_back(result.control_data[step * input_dim + i]);
+    BinaryLogger::dump(dir / ("u" + std::to_string(i + 1) + ".bin"), traj);
+  }
+
+  for (int i = 0; i < output_dim; ++i)
+  {
+    std::vector<double> traj;
+    traj.reserve(num_steps);
+    for (int step = 0; step < num_steps; ++step)
+      traj.push_back(result.residual[step * output_dim + i]);
+    BinaryLogger::dump(dir / ("r" + std::to_string(i + 1) + ".bin"), traj);
+  }
+
+  std::vector<double> alarm_traj;
+  alarm_traj.reserve(result.alarm_active.size());
+  for (bool val : result.alarm_active)
+    alarm_traj.push_back(val ? 1.0 : 0.0);
+  BinaryLogger::dump(dir / "alarm_active.bin", alarm_traj);
+
+  for (int i = 0; i < output_dim; ++i)
+  {
+    std::vector<double> traj;
+    traj.reserve(sc_transmissions);
+    for (std::size_t k = 0; k < sc_transmissions; ++k)
+      traj.push_back(result.malicious_signal[k * output_dim + i]);
+    BinaryLogger::dump(dir / ("malicious_attack" + std::to_string(i + 1) + ".bin"), traj);
+  }
+
+  const double total_samples = duration / sampling_period;
+  const std::size_t ca_transmissions = result.ca_trigger_times.size();
+
+  const double sc_reduction =
+      (total_samples > 0.0)
+          ? (1.0 - static_cast<double>(sc_transmissions) / total_samples) * 100.0
+          : 0.0;
+  const double ca_reduction =
+      (total_samples > 0.0)
+          ? (1.0 - static_cast<double>(ca_transmissions) / total_samples) * 100.0
+          : 0.0;
+
+  double sc_iet_min = 0.0, sc_iet_max = 0.0, sc_iet_mean = 0.0;
+  if (sc_transmissions > 1)
+  {
+    sc_iet_min = result.sc_trigger_times[1] - result.sc_trigger_times[0];
+    sc_iet_max = sc_iet_min;
+    double sum = 0.0;
+    for (std::size_t k = 1; k < sc_transmissions; ++k)
+    {
+      const double dt_event = result.sc_trigger_times[k] - result.sc_trigger_times[k - 1];
+      sum += dt_event;
+      if (dt_event < sc_iet_min)
+        sc_iet_min = dt_event;
+      if (dt_event > sc_iet_max)
+        sc_iet_max = dt_event;
+    }
+    sc_iet_mean = sum / static_cast<double>(sc_transmissions - 1);
+  }
+
+  double ca_iet_min = 0.0, ca_iet_max = 0.0, ca_iet_mean = 0.0;
+  if (ca_transmissions > 1)
+  {
+    ca_iet_min = result.ca_trigger_times[1] - result.ca_trigger_times[0];
+    ca_iet_max = ca_iet_min;
+    double sum = 0.0;
+    for (std::size_t k = 1; k < ca_transmissions; ++k)
+    {
+      const double dt_event = result.ca_trigger_times[k] - result.ca_trigger_times[k - 1];
+      sum += dt_event;
+      if (dt_event < ca_iet_min)
+        ca_iet_min = dt_event;
+      if (dt_event > ca_iet_max)
+        ca_iet_max = dt_event;
+    }
+    ca_iet_mean = sum / static_cast<double>(ca_transmissions - 1);
+  }
+
+  double sum_sq_err = 0.0, max_norm_err = 0.0;
+  for (int step = 0; step < num_steps; ++step)
+  {
+    double sq = 0.0;
+    for (int i = 0; i < state_dim; ++i)
+    {
+      const double val = result.estimation_error_data[step * state_dim + i];
+      sq += val * val;
+    }
+    sum_sq_err += sq;
+    const double norm = std::sqrt(sq);
+    if (norm > max_norm_err)
+      max_norm_err = norm;
+  }
+  const double rms_err = std::sqrt(sum_sq_err / static_cast<double>(num_steps));
+
+  double sum_sq_res = 0.0, max_norm_res = 0.0;
+  for (double val : result.residual_norm)
+  {
+    sum_sq_res += val * val;
+    if (val > max_norm_res)
+      max_norm_res = val;
+  }
+  const double rms_res = std::sqrt(sum_sq_res / static_cast<double>(num_steps));
+
+  const double total_alarm_duration =
+      static_cast<double>(
+          std::count(result.alarm_active.begin(), result.alarm_active.end(), true)) *
+      time_step;
+  const double malicious_control_duration =
+      static_cast<double>(result.malicious_control_steps) * time_step;
+  const double malicious_exposure_pct =
+      (duration > 0.0)
+          ? (malicious_control_duration / duration) * 100.0
+          : 0.0;
+  const double alarm_active_pct =
+      (duration > 0.0)
+          ? (total_alarm_duration / duration) * 100.0
+          : 0.0;
+
+  std::cout << std::fixed << std::setprecision(4);
+  std::cout
+      << "\n======================================================================\n"
+      << "  RELATÓRIO DIAGNÓSTICO: DUAL-CHANNEL PETC SOB ATAQUES FDI (CANAL SC) \n"
+      << "======================================================================\n"
+      << " 1. PARÂMETROS TEMPORAIS E DETECTOR ZONOTÓPICO                        \n"
+      << "----------------------------------------------------------------------\n"
+      << "  - Duração Total da Simulação (T)       : " << duration << " s\n"
+      << "  - Período Fundamental de Amostragem (h): " << sampling_period * 1e3 << " ms\n"
+      << "  - Passo de Integração RK5 (dt)         : " << time_step * 1e6 << " µs\n"
+      << "  - Detector de Resíduo                  : Zonotopo Dinâmico (Interval Hull)\n"
+      << "  - Incerteza Inicial (tilde_x0)         : [" << tilde_x0[0] << ", " << tilde_x0[1] << "]\n"
+      << "  - Piso Numérico de Tolerância (eps)    : " << epsilon_floor << "\n"
+      << "----------------------------------------------------------------------\n"
+      << " 2. DESEMPENHO DE REDE (DUAL-CHANNEL PETC)                            \n"
+      << "----------------------------------------------------------------------\n"
+      << "  - Avaliações Periódicas Totais (s_m)   : " << static_cast<int>(total_samples) << "\n"
+      << "  - Disparos Canal SC (Sensor-Controlador): " << sc_transmissions
+      << " (Redução: " << sc_reduction << " %)\n"
+      << "  - IET Canal SC [Mín / Méd / Máx]       : [" << sc_iet_min << " s / " << sc_iet_mean << " s / " << sc_iet_max << " s]\n"
+      << "  - Disparos Canal CA (Controlador-Atuador): " << ca_transmissions
+      << " (Redução: " << ca_reduction << " %)\n"
+      << "  - IET Canal CA [Mín / Méd / Máx]       : [" << ca_iet_min << " s / " << ca_iet_mean << " s / " << ca_iet_max << " s]\n"
+      << "----------------------------------------------------------------------\n"
+      << " 3. QUALIDADE DINÂMICA DE ESTIMAÇÃO E RESÍDUO                         \n"
+      << "----------------------------------------------------------------------\n"
+      << "  - Erro de Estimação ||e(t)||_2 (RMS)   : " << rms_err << "\n"
+      << "  - Erro de Estimação ||e(t)||_2 (Máximo): " << max_norm_err << "\n"
+      << "  - Resíduo de Saída ||r(t)||_2 (RMS)    : " << rms_res << "\n"
+      << "  - Resíduo de Saída ||r(t)||_2 (Máximo) : " << max_norm_res << "\n"
+      << "----------------------------------------------------------------------\n"
+      << " 4. DIAGNÓSTICO DO DETECTOR E RESILIÊNCIA A ATAQUES                   \n"
+      << "----------------------------------------------------------------------\n"
+      << "  - Falsos Positivos (Alarme sem ataque) : " << result.false_positives << " evento(s)\n"
+      << "  - Duração Total com Alarme Ativo       : " << total_alarm_duration << " s (" << alarm_active_pct << " %)\n"
+      << "  - Atualizações sob FDI não Mitigado    : " << result.malicious_control_count << " pacote(s)\n"
+      << "  - Passos de Integração com Estado Corrompido: " << result.malicious_control_steps << " passo(s)\n"
+      << "  - Tempo Total sob Atuação Maliciosa    : " << malicious_control_duration << " s\n"
+      << "  - Exposição da Malha ao Sinal Corrompido: " << malicious_exposure_pct << " % da simulação\n"
+      << "======================================================================\n"
+      << std::endl;
+}
+
 int main()
 {
   std::string systems_directory = "../experiments/data/";
@@ -768,7 +1041,7 @@ int main()
     // run_closed_loop_setm_event_map_simulation(engine);
     // run_dual_channel_closed_loop_setm_simulation(engine);
     // run_observer_petc_closed_loop_simulation(engine);
-    run_observer_petc_under_attack_simulation(engine);
+    run_observer_petc_under_attack_simulation_2(engine);
   }
   catch (const std::exception &ex)
   {

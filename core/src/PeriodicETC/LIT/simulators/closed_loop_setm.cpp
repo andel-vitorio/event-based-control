@@ -593,6 +593,339 @@ namespace PeriodicETC
           z = solver.step(t, z, signal, time_step);
         }
       }
+      return result;
+    }
+
+    ClosedLoopUnderAttackResult run_dual_channel_under_attacks_simulation(
+        ControlSystems::LITSystem &plant,
+        const Algebra::Vector &x0,
+        const Algebra::Vector &x_hat0,
+        const Algebra::Vector &x_hat_a0,
+        const Algebra::Vector &tilde_x0,
+        const Algebra::Matrix &K,
+        const Algebra::Matrix &L0,
+        const Algebra::Matrix &L1,
+        const Algebra::Matrix &L2,
+        const StaticETMConfig &etm_sc_config,
+        const StaticETMConfig &etm_ca_config,
+        double sampling_period,
+        double duration,
+        double time_step,
+        std::optional<Algebra::Vector> w,
+        double max_iet_sc,
+        double max_iet_ca,
+        std::function<Algebra::Vector(double)> fdi_attack,
+        double epsilon_floor)
+    {
+      using Algebra::Matrix;
+      using Algebra::Vector;
+
+      const auto timepts = Algebra::arange(0.0, duration, time_step);
+      const std::size_t num_steps = timepts.size();
+
+      const int state_dim = static_cast<int>(plant.states());
+      const int output_dim = static_cast<int>(plant.outputs());
+      const int input_dim = static_cast<int>(plant.inputs());
+      const int aug_dim = 2 * state_dim;
+
+      ClosedLoopUnderAttackResult result;
+      result.time_data = timepts;
+      result.states_data.reserve(num_steps * state_dim);
+      result.estimated_states_data.reserve(num_steps * state_dim);
+      result.estimation_error_data.reserve(num_steps * state_dim);
+      result.control_data.reserve(num_steps * input_dim);
+      result.residual.reserve(num_steps * output_dim);
+      result.residual_norm.reserve(num_steps);
+      result.sc_trigger_times.reserve(num_steps / 2);
+      result.ca_trigger_times.reserve(num_steps / 2);
+      result.alarm_active.reserve(num_steps / 2);
+      result.malicious_signal.reserve((num_steps / 2) * output_dim);
+
+      const Vector actual_w = w.has_value() ? *w : Vector(0);
+
+      StaticETM etm_sc(etm_sc_config, output_dim);
+      StaticETM etm_ca(etm_ca_config, state_dim);
+      Sampler sampler(sampling_period, 0.0);
+
+      const Matrix A = plant.getA();
+      const Matrix B = plant.getB();
+      const Matrix C = plant.getC();
+      const Matrix I_ny = Algebra::identity(output_dim);
+
+      // -------------------------------------------------------------------------
+      // Operadores Matriciais do Zonotopo do Erro Aumentado (Dimensão: 2*nx)
+      // -------------------------------------------------------------------------
+      // Matriz dinâmica contínua aumentada: A_e = [A + L0, -L0; L2*C, A - L2*C]
+      Matrix A_e(aug_dim, aug_dim);
+      const Matrix L2_C = L2 * C;
+      for (int r = 0; r < state_dim; ++r)
+      {
+        for (int c = 0; c < state_dim; ++c)
+        {
+          A_e(r, c) = A(r, c) + L0(r, c);
+          A_e(r, c + state_dim) = -L0(r, c);
+          A_e(r + state_dim, c) = L2_C(r, c);
+          A_e(r + state_dim, c + state_dim) = A(r, c) - L2_C(r, c);
+        }
+      }
+
+      // Operador de fluxo discreto por passo temporal: Phi_e = exp(A_e * time_step)
+      const Matrix Phi_e = Algebra::matrix_exp(A_e * time_step);
+
+      // Operador de salto discreto nominal: J_e = blkdiag(I - L1*C, I)
+      Matrix J_e = Algebra::identity(aug_dim);
+      const Matrix L1_C = L1 * C;
+      for (int r = 0; r < state_dim; ++r)
+      {
+        for (int c = 0; c < state_dim; ++c)
+        {
+          J_e(r, c) -= L1_C(r, c);
+        }
+      }
+
+      // Matriz de projeção para a saída medida: C_e = [C, 0]
+      Matrix C_e(output_dim, aug_dim);
+      for (int r = 0; r < output_dim; ++r)
+      {
+        for (int c = 0; c < state_dim; ++c)
+        {
+          C_e(r, c) = C(r, c);
+        }
+      }
+
+      // Inicialização do Zonotopo do Erro: Z_xi(0) = <p_xi(0), G_xi(0)>
+      Vector p_xi = Vector::concatenate(x0 - x_hat0, x0 - x_hat_a0);
+      Matrix G_xi(aug_dim, aug_dim);
+      for (int d = 0; d < state_dim; ++d)
+      {
+        G_xi(d, d) = tilde_x0[d];
+        G_xi(d + state_dim, d + state_dim) = tilde_x0[d];
+      }
+
+      // Lambda auxiliar para decisão de detecção via Interval Hull de Yu et al.
+      auto evaluate_zonotopic_alarm = [&](const Vector &innovation) -> bool
+      {
+        const Vector p_r = C_e * p_xi;
+        const Matrix G_r = C_e * G_xi;
+
+        for (int j = 0; j < output_dim; ++j)
+        {
+          double radius = 0.0;
+          for (int l = 0; l < aug_dim; ++l)
+          {
+            radius += std::abs(G_r(j, l));
+          }
+          radius = std::max(radius, epsilon_floor);
+
+          const double r_upper = p_r[j] + radius;
+          const double r_lower = p_r[j] - radius;
+
+          if (innovation[j] > r_upper || innovation[j] < r_lower)
+          {
+            return true;
+          }
+        }
+        return false;
+      };
+
+      EDOSolvers::RK5 solver(
+          [&plant, &A, &B, &C, &L0, &L2, state_dim, input_dim](
+              double /* t */,
+              const Vector &z_sys,
+              const Vector &signal) -> Vector
+          {
+            const Vector x_sys = z_sys.slice(0, state_dim);
+            const Vector x_est = z_sys.slice(state_dim, 2 * state_dim);
+            const Vector x_est_a = z_sys.slice(2 * state_dim, 3 * state_dim);
+            const Vector u = signal.slice(0, input_dim);
+            const Vector disturbance = signal.slice(input_dim, signal.size());
+
+            const Vector x_dot = plant.stateDerivative(x_sys, u, disturbance);
+            const Vector Bu = B * u;
+            const Vector delta_x_est = x_est - x_est_a;
+
+            const Vector x_est_dot = A * x_est + Bu + (L0 * delta_x_est);
+            const Vector x_est_a_dot = A * x_est_a + Bu + (L2 * (C * delta_x_est));
+
+            return Vector::concatenate(x_dot, Vector::concatenate(x_est_dot, x_est_a_dot));
+          });
+
+      Vector x = x0;
+      Vector x_est = x_hat0;
+      Vector x_est_a = x_hat_a0;
+      Vector z = Vector::concatenate(x, Vector::concatenate(x_est, x_est_a));
+
+      Vector y_r_sc = C * x0;
+      Vector x_r_ca = x_hat0;
+      Vector u_actual = K * x_r_ca;
+
+      Vector current_residual = C * x0 - C * x_hat0;
+
+      double last_sc_trigger = 0.0;
+      double last_ca_trigger = 0.0;
+
+      bool corrupted_state_active = false;
+
+      for (std::size_t i = 0; i < num_steps; ++i)
+      {
+        const double t = timepts[i];
+
+        x = z.slice(0, state_dim);
+        x_est = z.slice(state_dim, 2 * state_dim);
+        x_est_a = z.slice(2 * state_dim, 3 * state_dim);
+
+        const Vector y = C * x;
+
+        if (i == 0)
+        {
+          result.sc_trigger_times.push_back(t);
+          result.ca_trigger_times.push_back(t);
+          last_sc_trigger = t;
+          last_ca_trigger = t;
+          y_r_sc = y;
+
+          Vector atk(output_dim);
+          bool attack_at_event = false;
+          if (fdi_attack)
+          {
+            atk = fdi_attack(t);
+            if (Algebra::quadratic_form(atk, I_ny) > 1e-12)
+              attack_at_event = true;
+          }
+
+          for (int j = 0; j < output_dim; ++j)
+            result.malicious_signal.push_back(atk[j]);
+
+          const Vector y_received = attack_at_event ? (y + atk) : y;
+          const Vector innovation_sc = y_received - (C * x_est);
+          current_residual = innovation_sc;
+
+          // Avaliação dinâmica zonotópica
+          const bool current_alarm_active = evaluate_zonotopic_alarm(innovation_sc);
+          result.alarm_active.push_back(current_alarm_active);
+
+          if (current_alarm_active && !attack_at_event)
+            result.false_positives++;
+          if (!current_alarm_active && attack_at_event)
+          {
+            result.malicious_control_count++;
+            corrupted_state_active = true;
+          }
+
+          // Mitigação via canal redundante
+          const Vector y_for_update = current_alarm_active ? y : y_received;
+          x_est = x_est + (L1 * (y_for_update - (C * x_est)));
+          x_r_ca = x_est;
+          z = Vector::concatenate(x, Vector::concatenate(x_est, x_est_a));
+          u_actual = K * x_r_ca;
+
+          // Contração discreta do zonotopo do erro preservada pelo canal redundante
+          p_xi = J_e * p_xi;
+          G_xi = J_e * G_xi;
+        }
+        else if (sampler.shouldSample(t))
+        {
+          const bool sc_event = etm_sc.evaluateEvent(y, y_r_sc);
+          const bool sc_timeout = ((t - last_sc_trigger) >= (max_iet_sc - 1e-9));
+
+          if (sc_event || sc_timeout)
+          {
+            y_r_sc = y;
+            last_sc_trigger = t;
+            result.sc_trigger_times.push_back(t);
+
+            Vector atk(output_dim);
+            bool attack_at_event = false;
+            if (fdi_attack)
+            {
+              atk = fdi_attack(t);
+              if (Algebra::quadratic_form(atk, I_ny) > 1e-12)
+                attack_at_event = true;
+            }
+
+            for (int j = 0; j < output_dim; ++j)
+              result.malicious_signal.push_back(atk[j]);
+
+            const Vector y_received = attack_at_event ? (y + atk) : y;
+            const Vector innovation_sc = y_received - (C * x_est);
+            current_residual = innovation_sc;
+
+            // Avaliação dinâmica zonotópica
+            const bool current_alarm_active = evaluate_zonotopic_alarm(innovation_sc);
+            result.alarm_active.push_back(current_alarm_active);
+
+            if (current_alarm_active && !attack_at_event)
+              result.false_positives++;
+
+            if (!current_alarm_active && attack_at_event)
+            {
+              result.malicious_control_count++;
+              corrupted_state_active = true;
+            }
+            else if (current_alarm_active || !attack_at_event)
+              corrupted_state_active = false;
+
+            // Mitigação via canal redundante
+            const Vector y_for_update = current_alarm_active ? y : y_received;
+            x_est = x_est + (L1 * (y_for_update - (C * x_est)));
+            z = Vector::concatenate(x, Vector::concatenate(x_est, x_est_a));
+
+            // Contração discreta do zonotopo do erro preservada pelo canal redundante
+            p_xi = J_e * p_xi;
+            G_xi = J_e * G_xi;
+          }
+          else
+          {
+            current_residual = y - (C * x_est);
+          }
+
+          const bool ca_event = etm_ca.evaluateEvent(x_est, x_r_ca);
+          const bool ca_timeout = ((t - last_ca_trigger) >= (max_iet_ca - 1e-9));
+
+          if (ca_event || ca_timeout)
+          {
+            x_r_ca = x_est;
+            last_ca_trigger = t;
+            result.ca_trigger_times.push_back(t);
+            u_actual = K * x_r_ca;
+          }
+        }
+        else
+        {
+          current_residual = y - (C * x_est);
+        }
+
+        const double r_norm_sq = Algebra::quadratic_form(current_residual, I_ny);
+        const double r_norm = std::sqrt(std::max(0.0, r_norm_sq));
+        result.residual_norm.push_back(r_norm);
+
+        for (int j = 0; j < output_dim; ++j)
+          result.residual.push_back(current_residual[j]);
+
+        if (corrupted_state_active)
+          result.malicious_control_steps++;
+
+        const Vector estimation_error = x - x_est;
+        for (int j = 0; j < state_dim; ++j)
+        {
+          result.states_data.push_back(x[j]);
+          result.estimated_states_data.push_back(x_est[j]);
+          result.estimation_error_data.push_back(estimation_error[j]);
+        }
+
+        for (int j = 0; j < input_dim; ++j)
+          result.control_data.push_back(u_actual[j]);
+
+        if (i + 1 < num_steps)
+        {
+          const Vector signal = Vector::concatenate(u_actual, actual_w);
+          z = solver.step(t, z, signal, time_step);
+
+          // Propagação contínua do zonotopo sincronizada com o integrador RK5
+          p_xi = Phi_e * p_xi;
+          G_xi = Phi_e * G_xi;
+        }
+      }
 
       return result;
     }
