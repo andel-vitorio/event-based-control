@@ -204,7 +204,7 @@ def synthesize_output_based_setm(
   Ftil = (
       e[1].T
       + upsilon1 * e[2].T
-      + upsilon2 * e[5].T
+      # + upsilon2 * e[5].T
       + upsilon3 * e[4].T
       + e[6].T @ J1
   )
@@ -299,9 +299,9 @@ def synthesize_output_based_setm(
       Γ3 << -eps * np.eye(Γ3.shape[0], dtype=dtype),
   ]
 
-  objective = cp.Minimize(cp.trace(Ψca_til + Ξca_til + Ψsc_til + Ξsc))
+  # objective = cp.Minimize(cp.trace(Ψca_til + Ξca_til + Ψsc_til + Ξsc))
   # objective = cp.Minimize(cp.trace(Ψsc_til + Ξsc))
-  # objective = cp.Minimize(cp.trace(Ψca_til + Ξca_til))
+  objective = cp.Minimize(cp.trace(Ψca_til + Ξca_til))
   # objective = cp.Minimize(0.0)
   problem = cp.Problem(objective, constraints)
 
@@ -743,5 +743,474 @@ def synthesize_impulsive_observer(
           "step": worst_step,
           "tau": worst_step * h,
           "spectral_radius": worst_spectral_radius,
+      },
+  }
+
+
+def synthesize_controller_setm(
+    design_params: Dict[str, Any],
+    eps: float = 1e-6,
+    solver: str = cp.MOSEK,
+    verbose: bool = False,
+    dtype: np.dtype = np.float64,
+) -> Optional[Dict[str, Any]]:
+  """Synthesizes state-feedback SETM gain K and triggering matrices (Psi, Xi)
+  """
+  A = np.asarray(design_params["A"], dtype=dtype)
+  B = np.asarray(design_params["B"], dtype=dtype)
+
+  nx = A.shape[0]
+  nu = B.shape[1]
+
+  h = float(design_params["h"])
+  lam = float(design_params.get("λ", design_params.get("lambda", 0.1)))
+
+  upsilon1 = float(
+      design_params.get("υ1", design_params.get("upsilon1", 1.0))
+  )
+  upsilon2 = float(
+      design_params.get("υ2", design_params.get("upsilon2", 1.0))
+  )
+  upsilon3 = float(
+      design_params.get("υ3", design_params.get("upsilon3", 1.0))
+  )
+
+  tol_zero = 1e-8
+  if abs(upsilon1) < tol_zero:
+    raise ValueError(
+        "O parâmetro upsilon1 (υ1) não pode ser nulo para garantir a injeção do ganho K."
+    )
+  if abs(upsilon2) < tol_zero:
+    raise ValueError(
+        "O parâmetro upsilon2 (υ2) não pode ser nulo para garantir o acoplamento no erro de transmissão."
+    )
+  if upsilon3 <= tol_zero:
+    raise ValueError(
+        "O parâmetro upsilon3 (υ3) deve ser estritamente positivo para contrapor o bloco +h*R."
+    )
+
+  A_lambda = A + lam * np.eye(nx, dtype=dtype)
+  exp_lam_h = float(np.exp(lam * h))
+
+  dim_zeta = 5 * nx
+  e = {}
+  for i in range(1, 6):
+    ei = np.zeros((nx, dim_zeta), dtype=dtype)
+    ei[:, (i - 1) * nx: i * nx] = np.eye(nx, dtype=dtype)
+    e[i] = ei
+
+  κ1 = np.vstack([e[2], e[5]])
+  κ2 = np.vstack([e[1] - e[2], e[1] + e[2] - 2.0 * e[3]])
+  e12 = e[1] - e[2]
+
+  Ptil = cp.Variable((nx, nx), symmetric=True)
+  Rtil = cp.Variable((nx, nx), symmetric=True)
+  S1til = cp.Variable((nx, nx), symmetric=True)
+  S2til = cp.Variable((nx, nx))
+  S3til = cp.Variable((nx, nx))
+  Q1til = cp.Variable((nx, nx), symmetric=True)
+  Q2til = cp.Variable((nx, nx))
+  Q3til = cp.Variable((nx, nx))
+  Mtil = cp.Variable((2 * nx, 2 * nx), symmetric=True)
+  Ψtil = cp.Variable((nx, nx), symmetric=True)
+  Ξtil = cp.Variable((nx, nx), symmetric=True)
+  Ytil = cp.Variable((2 * nx, dim_zeta))
+  Ktil = cp.Variable((nu, nx))
+  X = cp.Variable((nx, nx))
+
+  def He(expr):
+    return expr + expr.T
+
+  zero_nx = np.zeros((nx, nx), dtype=dtype)
+  Rcal = cp.bmat([
+      [Rtil, zero_nx],
+      [zero_nx, 3.0 * Rtil],
+  ])
+
+  Ftil = (
+      e[1].T
+      + upsilon1 * e[2].T
+      # + upsilon2 * e[5].T
+      + upsilon3 * e[4].T
+  )
+
+  S_affine = S2til @ e[2] + S3til @ e[5]
+  Q_affine = Q2til @ e[2] + Q3til @ e[5]
+
+  Lambda1 = e12.T @ S1til @ e12 + He(e12.T @ S_affine)
+  Lambda2 = (
+      κ1.T @ Mtil @ κ1
+      + e[4].T @ Rtil @ e[4]
+      - e[3].T @ Q1til @ e[3]
+      + He(
+          e12.T @ S1til @ e[4]
+          + e[4].T @ S_affine
+          + e[1].T @ (Q1til @ e[3] + Q_affine)
+      )
+  )
+  Lambda3 = e[3].T @ Q1til @ e[3] + κ1.T @ Mtil @ κ1 + He(e[3].T @ Q_affine)
+
+  theta0_bar = (
+      He(e[1].T @ Ptil @ e[4])
+      - e[5].T @ Ξtil @ e[5]
+      + h * Lambda2
+      - Lambda1
+      - He(Ytil.T @ κ2)
+      + He(Ftil @ (A_lambda @ X @ e[1] - X @ e[4]))
+  )
+
+  theta1_bar = -Lambda2 - Lambda3
+  theta2 = He(Ftil @ B @ Ktil @ (e[2] + e[5]))
+
+  Theta_bar_1 = theta0_bar + theta2
+  Theta_bar_2 = theta0_bar + h * theta1_bar + theta2
+  Theta_bar_3 = theta0_bar + h * theta1_bar + exp_lam_h * theta2
+
+  zero_2nx_nx = np.zeros((2 * nx, nx), dtype=dtype)
+
+  Gamma1 = cp.bmat([
+      [Theta_bar_1, e[2].T @ X.T],
+      [X @ e[2], -Ψtil],
+  ])
+
+  Gamma2 = cp.bmat([
+      [Theta_bar_2, Ytil.T, e[2].T @ X.T],
+      [Ytil, -(1.0 / h) * Rcal, zero_2nx_nx],
+      [X @ e[2], zero_2nx_nx.T, -Ψtil],
+  ])
+
+  Gamma3 = cp.bmat([
+      [Theta_bar_3, Ytil.T, e[2].T @ X.T],
+      [Ytil, -(1.0 / h) * Rcal, zero_2nx_nx],
+      [X @ e[2], zero_2nx_nx.T, -Ψtil],
+  ])
+
+  I_nx = np.eye(nx, dtype=dtype)
+  constraints = [
+      Ptil >> eps * I_nx,
+      Rtil >> eps * I_nx,
+      S1til >> eps * I_nx,
+      Q1til >> eps * I_nx,
+      Mtil >> eps * np.eye(2 * nx, dtype=dtype),
+      Ψtil >> eps * I_nx,
+      Ξtil >> eps * I_nx,
+      Gamma1 << -eps * np.eye(Gamma1.shape[0], dtype=dtype),
+      Gamma2 << -eps * np.eye(Gamma2.shape[0], dtype=dtype),
+      Gamma3 << -eps * np.eye(Gamma3.shape[0], dtype=dtype),
+  ]
+
+  objective = cp.Minimize(cp.trace(Ψtil + Ξtil))
+  problem = cp.Problem(objective, constraints)
+
+  try:
+    problem.solve(solver=solver, verbose=verbose)
+  except Exception as err:
+    if verbose:
+      print(f"[Solver Error] Controller synthesis failed: {err}")
+    return None
+
+  if problem.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
+    if verbose:
+      print(f"[Solver Status] Infeasible/Unbounded: {problem.status}")
+    return None
+
+  X_val = np.asarray(X.value, dtype=dtype)
+  try:
+    X_inv = np.linalg.inv(X_val)
+    Ψtil_val = np.asarray(Ψtil.value, dtype=dtype)
+    Ψ_rec = np.linalg.inv(Ψtil_val)
+  except np.linalg.LinAlgError:
+    if verbose:
+      print("[Recovery Error] Singular slack matrix X or Psitil detected.")
+    return None
+
+  Ktil_val = np.asarray(Ktil.value, dtype=dtype)
+  Ξtil_val = np.asarray(Ξtil.value, dtype=dtype)
+  Ptil_val = np.asarray(Ptil.value, dtype=dtype)
+  Rtil_val = np.asarray(Rtil.value, dtype=dtype)
+
+  K_rec = Ktil_val @ X_inv
+  Ξ_rec = X_inv.T @ Ξtil_val @ X_inv
+  P_rec = X_inv.T @ Ptil_val @ X_inv
+  R_rec = X_inv.T @ Rtil_val @ X_inv
+
+  return {
+      "solver_status": problem.status,
+      "optimal_value": problem.value,
+      "controller": {
+          "K": K_rec,
+          "Ktil": Ktil_val,
+      },
+      "etm": {
+          "Ψ": Ψ_rec,
+          "Ξ": Ξ_rec,
+          "Psitil": Ψtil_val,
+          "Xitil": Ξtil_val,
+      },
+      "functional": {
+          "P": P_rec,
+          "R": R_rec,
+      },
+      "slacks": {
+          "X": X_val,
+      },
+      "transformed": {
+          "Ptil": Ptil_val,
+          "Rtil": Rtil_val,
+      },
+  }
+
+
+def synthesize_observer_luenberger(
+    design_params: Dict[str, Any],
+    eps: float = 1e-6,
+    solver: str = cp.MOSEK,
+    verbose: bool = False,
+    dtype: np.dtype = np.float64,
+) -> Optional[Dict[str, Any]]:
+  """Synthesizes continuous Luenberger observer gain L
+  """
+  A = np.asarray(design_params["A"], dtype=dtype)
+  C = np.asarray(design_params["C"], dtype=dtype)
+
+  nx = A.shape[0]
+  ny = C.shape[0]
+
+  lam_obs = float(
+      design_params.get("λ_obs", design_params.get("lambda_obs", 1.0))
+  )
+  p_min = float(design_params.get("p_min", design_params.get("pmin", 1.0)))
+
+  if lam_obs <= 0.0:
+    raise ValueError(
+        "A taxa prescrita lambda_obs deve ser estritamente positiva.")
+  if p_min <= 0.0:
+    raise ValueError(
+        "O parâmetro de normalização p_min deve ser estritamente positivo.")
+
+  A_lambda_obs = A + lam_obs * np.eye(nx, dtype=dtype)
+  Pe = cp.Variable((nx, nx), symmetric=True)
+  YL = cp.Variable((nx, ny))
+  gamma_L = cp.Variable()
+
+  def He(expr):
+    return expr + expr.T
+
+  decay_lmi = He(Pe @ A_lambda_obs - YL @ C)
+  I_nx = np.eye(nx, dtype=dtype)
+  I_ny = np.eye(ny, dtype=dtype)
+
+  norm_lmi = cp.bmat([
+      [-gamma_L * I_nx, YL],
+      [YL.T, -I_ny],
+  ])
+
+  constraints = [
+      decay_lmi << -eps * I_nx,
+      norm_lmi << -eps * np.eye(nx + ny, dtype=dtype),
+      Pe >> p_min * I_nx,
+      gamma_L >= eps,
+  ]
+
+  objective = cp.Minimize(gamma_L)
+  problem = cp.Problem(objective, constraints)
+
+  try:
+    problem.solve(solver=solver, verbose=verbose)
+  except Exception as err:
+    if verbose:
+      print(f"[Solver Error] Observer synthesis failed: {err}")
+    return None
+
+  if problem.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
+    if verbose:
+      print(f"[Solver Status] Infeasible/Unbounded: {problem.status}")
+    return None
+
+  Pe_val = np.asarray(Pe.value, dtype=dtype)
+  YL_val = np.asarray(YL.value, dtype=dtype)
+  gamma_L_val = float(gamma_L.value)
+
+  try:
+    Pe_inv = np.linalg.inv(Pe_val)
+  except np.linalg.LinAlgError:
+    if verbose:
+      print("[Recovery Error] Singular Lyapunov matrix Pe detected.")
+    return None
+
+  L_rec = Pe_inv @ YL_val
+  theoretical_norm_bound = np.sqrt(gamma_L_val) / p_min
+  actual_spectral_norm = float(np.linalg.norm(L_rec, ord=2))
+  closed_loop_error_poles = np.linalg.eigvals(A - L_rec @ C)
+
+  return {
+      "solver_status": problem.status,
+      "optimal_value": problem.value,
+      "observer": {
+          "L": L_rec,
+          "Pe": Pe_val,
+          "YL": YL_val,
+          "gamma_L": gamma_L_val,
+      },
+      "performance": {
+          "theoretical_gain_bound": theoretical_norm_bound,
+          "actual_gain_norm_2": actual_spectral_norm,
+          "error_poles": closed_loop_error_poles,
+          "min_decay_rate_achieved": float(-np.max(np.real(closed_loop_error_poles))),
+      },
+  }
+
+
+def synthesize_observer_luenberger_min_peaking(
+    design_params: Dict[str, Any],
+    eps: float = 1e-6,
+    solver: str = cp.MOSEK,
+    verbose: bool = False,
+    dtype: np.dtype = np.float64,
+) -> Optional[Dict[str, Any]]:
+  """Synthesizes continuous Luenberger observer gain L minimizing transient peaking
+
+  via condition number bounding of the Lyapunov matrix Pe (Approach A).
+
+  Optimization problem:
+      min_{Pe, YL, mu, gamma_L}  mu + weight_gamma * gamma_L
+      s.t.
+          He(Pe * (A + lambda_obs * I) - YL * C) <= -eps * I
+          Pe >= p_min * I
+          Pe <= mu * I
+          [ -gamma_L * I_nx,   YL    ]
+          [      YL^T      , -I_ny   ] <= -eps * I
+          gamma_L <= gamma_L_max  (optional)
+          mu >= p_min, gamma_L >= eps
+  """
+  A = np.asarray(design_params["A"], dtype=dtype)
+  C = np.asarray(design_params["C"], dtype=dtype)
+
+  nx = A.shape[0]
+  ny = C.shape[0]
+
+  lam_obs = float(
+      design_params.get("λ_obs", design_params.get("lambda_obs", 1.0))
+  )
+  p_min = float(design_params.get("p_min", design_params.get("pmin", 1.0)))
+  weight_gamma = float(
+      design_params.get(
+          "weight_gamma", design_params.get("weight_gain", 1e-4))
+  )
+  gamma_L_max = design_params.get(
+      "gamma_L_max", design_params.get("gamma_max", None))
+
+  if lam_obs <= 0.0:
+    raise ValueError(
+        "A taxa prescrita lambda_obs deve ser estritamente positiva.")
+  if p_min <= 0.0:
+    raise ValueError(
+        "O parâmetro de normalização p_min deve ser estritamente positivo.")
+  if weight_gamma < 0.0:
+    raise ValueError(
+        "O peso de regularização weight_gamma não pode ser negativo.")
+  if gamma_L_max is not None and float(gamma_L_max) <= 0.0:
+    raise ValueError(
+        "O limite superior gamma_L_max deve ser estritamente positivo.")
+
+  A_lambda_obs = A + lam_obs * np.eye(nx, dtype=dtype)
+
+  # Variáveis de decisão primárias
+  Pe = cp.Variable((nx, nx), PSD=True)
+  YL = cp.Variable((nx, ny))
+  p_max = cp.Variable(pos=True)
+  p_min = cp.Variable(pos=True)
+  gamma_L = cp.Variable()  # Cota de norma para YL via Schur
+
+  def He(expr):
+    return expr + expr.T
+
+  decay_lmi = He(Pe @ A_lambda_obs - YL @ C)
+
+  I_nx = np.eye(nx, dtype=dtype)
+  I_ny = np.eye(ny, dtype=dtype)
+
+  norm_lmi = cp.bmat([
+      [-gamma_L * I_nx, YL],
+      [YL.T, -I_ny],
+  ])
+
+  # Restrições LMIs
+  constraints = [
+      decay_lmi << -eps * I_nx,
+      norm_lmi << -eps * np.eye(nx + ny, dtype=dtype),
+      Pe >> p_min * I_nx,
+      Pe << p_max * I_nx,
+      # mu >= eps,
+      p_min >= 6.0,
+      gamma_L >= eps,
+  ]
+
+  if gamma_L_max is not None:
+    constraints.append(gamma_L <= float(gamma_L_max))
+
+  # Minimização da excentricidade métrica com regularização do ganho
+  obj_expr = weight_gamma * gamma_L + p_max
+  problem = cp.Problem(cp.Minimize(obj_expr), constraints)
+
+  try:
+    problem.solve(solver=solver, verbose=verbose)
+  except Exception as err:
+    if verbose:
+      print(f"[Solver Error] Observer synthesis failed: {err}")
+    return None
+
+  if problem.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
+    if verbose:
+      print(f"[Solver Status] Infeasible/Unbounded: {problem.status}")
+    return None
+
+  Pe_val = np.asarray(Pe.value, dtype=dtype)
+  YL_val = np.asarray(YL.value, dtype=dtype)
+  gamma_L_val = float(gamma_L.value)
+  # mu_val = float(mu.value)
+
+  try:
+    Pe_inv = np.linalg.inv(Pe_val)
+  except np.linalg.LinAlgError:
+    if verbose:
+      print("[Recovery Error] Singular Lyapunov matrix Pe detected.")
+    return None
+
+  # Reconstrução paramétrica
+  L_rec = Pe_inv @ YL_val
+
+  # Espectro e métricas de peaking
+  eigvals_Pe = np.linalg.eigvalsh(Pe_val)
+  lambda_min_Pe = float(np.min(eigvals_Pe))
+  lambda_max_Pe = float(np.max(eigvals_Pe))
+  condition_number_Pe = lambda_max_Pe / lambda_min_Pe
+  theoretical_peaking_factor = float(np.sqrt(condition_number_Pe))
+
+  print(p_min.value)
+  print(p_max.value)
+  theoretical_norm_bound = float(np.sqrt(gamma_L_val) / p_min.value)
+  # theoretical_norm_bound = 0.0
+  actual_spectral_norm = float(np.linalg.norm(L_rec, ord=2))
+  closed_loop_error_poles = np.linalg.eigvals(A - L_rec @ C)
+  min_decay_achieved = float(-np.max(np.real(closed_loop_error_poles)))
+
+  return {
+      "solver_status": problem.status,
+      "optimal_value": problem.value,
+      "observer": {
+          "L": L_rec,
+          "Pe": Pe_val,
+          "YL": YL_val,
+          "gamma_L": gamma_L_val,
+          # "mu": mu_val,
+      },
+      "performance": {
+          "condition_number_Pe": condition_number_Pe,
+          "theoretical_peaking_factor": theoretical_peaking_factor,
+          "theoretical_gain_bound": theoretical_norm_bound,
+          "actual_gain_norm_2": actual_spectral_norm,
+          "error_poles": closed_loop_error_poles,
+          "min_decay_rate_achieved": min_decay_achieved,
       },
   }

@@ -1,0 +1,45 @@
+{
+  "name": "system-01",
+  "system_matrices": {
+    "A": [
+      [-2.0, 1.0],
+      [0.0, -3.0]
+    ],
+    "B": [[1.0], [2.0]],
+    "C": [[1.0, 0.0]],
+    "D": null,
+    "E": null,
+    "F": null,
+    "Cz": null,
+    "Dz": null,
+    "Fz": null
+  },
+  "states": {
+    "x1": {
+      "name": "Estado $x_1(t)$",
+      "symbol": "$x_1$",
+      "unit": ""
+    },
+    "x2": {
+      "name": "Estado $x_2(t)$",
+      "symbol": "$x_2$",
+      "unit": ""
+    }
+  },
+  "disturbances": {},
+  "inputs": {
+    "u1": {
+      "name": "Entrada $u(t)$",
+      "symbol": "$u$",
+      "unit": ""
+    }
+  },
+  "performance_outputs": null,
+  "outputs": {
+    "y1": {
+      "name": "Saída $y_1(t)$",
+      "symbol": "$y_1$",
+      "unit": ""
+    }
+  }
+}

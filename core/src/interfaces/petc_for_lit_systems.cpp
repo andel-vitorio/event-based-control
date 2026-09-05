@@ -27,7 +27,7 @@ namespace PeriodicETC
     {
     private:
       PeriodicETC::LITEngine internal_engine;
-      PeriodicETC::LIT_SETM::ExtendedClosedLoopResult last_result;
+      PeriodicETC::LIT_SETM::ClosedLoopWithObserversResult last_result;
       bool system_loaded = false;
       int nx = 0;
       int nu = 0;
@@ -149,7 +149,7 @@ namespace PeriodicETC
         etm_ca_config.Psi = Psi_ca;
         etm_ca_config.Xi = Xi_ca;
 
-        last_result = internal_engine.runDualChannelClosedLoopExtended(
+        last_result = internal_engine.runDualChannelClosedLoop(
             x0, x_hat0, x_hat_a0,
             K, L0, L1, L2,
             etm_sc_config, etm_ca_config,
