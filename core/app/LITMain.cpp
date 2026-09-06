@@ -757,9 +757,6 @@ void run_observer_petc_under_attack_simulation_2(PeriodicETC::LITEngine &engine)
   const double max_iet_sc = 5.0 * sampling_period;
   const double max_iet_ca = 10.0;
 
-  // -------------------------------------------------------------------------
-  // Configuração do Detector Adaptativo Baseado em Zonotopos
-  // -------------------------------------------------------------------------
   Vector tilde_x0(state_dim);
   tilde_x0[0] = 0.05;
   tilde_x0[1] = 0.05;
@@ -801,7 +798,7 @@ void run_observer_petc_under_attack_simulation_2(PeriodicETC::LITEngine &engine)
   etm_ca_config.Xi = Xi_ca;
 
   TemporaryOutputNoise attack_noise(
-      output_dim, 5.0, 6.0, 0.1, TemporaryOutputNoise::Type::BIAS);
+      output_dim, 0.5, 1.5, 0.1, TemporaryOutputNoise::Type::BIAS);
 
   auto result = engine.runDualChannelUnderAttackClosedLoop(
       x0, x_hat0, x_hat_a0, tilde_x0, K, L0, L1, L2,
@@ -880,6 +877,21 @@ void run_observer_petc_under_attack_simulation_2(PeriodicETC::LITEngine &engine)
     for (std::size_t k = 0; k < sc_transmissions; ++k)
       traj.push_back(result.malicious_signal[k * output_dim + i]);
     BinaryLogger::dump(dir / ("malicious_attack" + std::to_string(i + 1) + ".bin"), traj);
+  }
+
+  for (int i = 0; i < output_dim; ++i)
+  {
+    std::vector<double> traj_upper;
+    std::vector<double> traj_lower;
+    traj_upper.reserve(sc_transmissions);
+    traj_lower.reserve(sc_transmissions);
+    for (std::size_t k = 0; k < sc_transmissions; ++k)
+    {
+      traj_upper.push_back(result.threshold_upper[k * output_dim + i]);
+      traj_lower.push_back(result.threshold_lower[k * output_dim + i]);
+    }
+    BinaryLogger::dump(dir / ("threshold_upper" + std::to_string(i + 1) + ".bin"), traj_upper);
+    BinaryLogger::dump(dir / ("threshold_lower" + std::to_string(i + 1) + ".bin"), traj_lower);
   }
 
   const double total_samples = duration / sampling_period;

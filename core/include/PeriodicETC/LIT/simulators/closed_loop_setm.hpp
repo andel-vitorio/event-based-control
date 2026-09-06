@@ -29,6 +29,8 @@ namespace PeriodicETC
     {
       std::vector<double> residual;
       std::vector<double> residual_norm;
+      std::vector<double> threshold_upper;
+      std::vector<double> threshold_lower;
       std::vector<bool> alarm_active;
       std::vector<double> alarm_trigger_times;
       std::vector<double> malicious_signal;

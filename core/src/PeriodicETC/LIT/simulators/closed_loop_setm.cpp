@@ -595,7 +595,6 @@ namespace PeriodicETC
       }
       return result;
     }
-
     ClosedLoopUnderAttackResult run_dual_channel_under_attacks_simulation(
         ControlSystems::LITSystem &plant,
         const Algebra::Vector &x0,
@@ -641,6 +640,10 @@ namespace PeriodicETC
       result.alarm_active.reserve(num_steps / 2);
       result.malicious_signal.reserve((num_steps / 2) * output_dim);
 
+      // Reserva de memória para os limites do detector em t_k^sc
+      result.threshold_upper.reserve((num_steps / 2) * output_dim);
+      result.threshold_lower.reserve((num_steps / 2) * output_dim);
+
       const Vector actual_w = w.has_value() ? *w : Vector(0);
 
       StaticETM etm_sc(etm_sc_config, output_dim);
@@ -652,10 +655,6 @@ namespace PeriodicETC
       const Matrix C = plant.getC();
       const Matrix I_ny = Algebra::identity(output_dim);
 
-      // -------------------------------------------------------------------------
-      // Operadores Matriciais do Zonotopo do Erro Aumentado (Dimensão: 2*nx)
-      // -------------------------------------------------------------------------
-      // Matriz dinâmica contínua aumentada: A_e = [A + L0, -L0; L2*C, A - L2*C]
       Matrix A_e(aug_dim, aug_dim);
       const Matrix L2_C = L2 * C;
       for (int r = 0; r < state_dim; ++r)
@@ -669,31 +668,18 @@ namespace PeriodicETC
         }
       }
 
-      // Operador de fluxo discreto por passo temporal: Phi_e = exp(A_e * time_step)
       const Matrix Phi_e = Algebra::matrix_exp(A_e * time_step);
-
-      // Operador de salto discreto nominal: J_e = blkdiag(I - L1*C, I)
       Matrix J_e = Algebra::identity(aug_dim);
       const Matrix L1_C = L1 * C;
       for (int r = 0; r < state_dim; ++r)
-      {
         for (int c = 0; c < state_dim; ++c)
-        {
           J_e(r, c) -= L1_C(r, c);
-        }
-      }
 
-      // Matriz de projeção para a saída medida: C_e = [C, 0]
       Matrix C_e(output_dim, aug_dim);
       for (int r = 0; r < output_dim; ++r)
-      {
         for (int c = 0; c < state_dim; ++c)
-        {
           C_e(r, c) = C(r, c);
-        }
-      }
 
-      // Inicialização do Zonotopo do Erro: Z_xi(0) = <p_xi(0), G_xi(0)>
       Vector p_xi = Vector::concatenate(x0 - x_hat0, x0 - x_hat_a0);
       Matrix G_xi(aug_dim, aug_dim);
       for (int d = 0; d < state_dim; ++d)
@@ -702,30 +688,29 @@ namespace PeriodicETC
         G_xi(d + state_dim, d + state_dim) = tilde_x0[d];
       }
 
-      // Lambda auxiliar para decisão de detecção via Interval Hull de Yu et al.
       auto evaluate_zonotopic_alarm = [&](const Vector &innovation) -> bool
       {
         const Vector p_r = C_e * p_xi;
         const Matrix G_r = C_e * G_xi;
+        bool alarm = false;
 
         for (int j = 0; j < output_dim; ++j)
         {
           double radius = 0.0;
           for (int l = 0; l < aug_dim; ++l)
-          {
             radius += std::abs(G_r(j, l));
-          }
           radius = std::max(radius, epsilon_floor);
 
           const double r_upper = p_r[j] + radius;
           const double r_lower = p_r[j] - radius;
 
+          result.threshold_upper.push_back(r_upper);
+          result.threshold_lower.push_back(r_lower);
+
           if (innovation[j] > r_upper || innovation[j] < r_lower)
-          {
-            return true;
-          }
+            alarm = true;
         }
-        return false;
+        return alarm;
       };
 
       EDOSolvers::RK5 solver(
@@ -800,8 +785,8 @@ namespace PeriodicETC
           const Vector innovation_sc = y_received - (C * x_est);
           current_residual = innovation_sc;
 
-          // Avaliação dinâmica zonotópica
-          const bool current_alarm_active = evaluate_zonotopic_alarm(innovation_sc);
+          const bool current_alarm_active =
+              evaluate_zonotopic_alarm(innovation_sc);
           result.alarm_active.push_back(current_alarm_active);
 
           if (current_alarm_active && !attack_at_event)
@@ -812,14 +797,12 @@ namespace PeriodicETC
             corrupted_state_active = true;
           }
 
-          // Mitigação via canal redundante
           const Vector y_for_update = current_alarm_active ? y : y_received;
           x_est = x_est + (L1 * (y_for_update - (C * x_est)));
           x_r_ca = x_est;
           z = Vector::concatenate(x, Vector::concatenate(x_est, x_est_a));
           u_actual = K * x_r_ca;
 
-          // Contração discreta do zonotopo do erro preservada pelo canal redundante
           p_xi = J_e * p_xi;
           G_xi = J_e * G_xi;
         }
@@ -850,7 +833,6 @@ namespace PeriodicETC
             const Vector innovation_sc = y_received - (C * x_est);
             current_residual = innovation_sc;
 
-            // Avaliação dinâmica zonotópica
             const bool current_alarm_active = evaluate_zonotopic_alarm(innovation_sc);
             result.alarm_active.push_back(current_alarm_active);
 
@@ -865,12 +847,10 @@ namespace PeriodicETC
             else if (current_alarm_active || !attack_at_event)
               corrupted_state_active = false;
 
-            // Mitigação via canal redundante
             const Vector y_for_update = current_alarm_active ? y : y_received;
             x_est = x_est + (L1 * (y_for_update - (C * x_est)));
             z = Vector::concatenate(x, Vector::concatenate(x_est, x_est_a));
 
-            // Contração discreta do zonotopo do erro preservada pelo canal redundante
             p_xi = J_e * p_xi;
             G_xi = J_e * G_xi;
           }
@@ -895,7 +875,8 @@ namespace PeriodicETC
           current_residual = y - (C * x_est);
         }
 
-        const double r_norm_sq = Algebra::quadratic_form(current_residual, I_ny);
+        const double r_norm_sq =
+            Algebra::quadratic_form(current_residual, I_ny);
         const double r_norm = std::sqrt(std::max(0.0, r_norm_sq));
         result.residual_norm.push_back(r_norm);
 
@@ -921,7 +902,6 @@ namespace PeriodicETC
           const Vector signal = Vector::concatenate(u_actual, actual_w);
           z = solver.step(t, z, signal, time_step);
 
-          // Propagação contínua do zonotopo sincronizada com o integrador RK5
           p_xi = Phi_e * p_xi;
           G_xi = Phi_e * G_xi;
         }
